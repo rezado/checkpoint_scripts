@@ -1,0 +1,222 @@
+name: Checkpoint Generation Trigger
+
+run-name: "${{ github.event.inputs.note }} - ${{ github.event.inputs.spec_suite }} - ${{ github.event.inputs.spec_apps }} - ${{ github.event.inputs.emulator }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "备注信息，显示在 CI 标题中"
+        required: false
+        type: string
+        default: "Checkpoint Generation"
+      spec_suite:
+        description: "SPEC 版本"
+        required: true
+        type: choice
+        options:
+          - spec06
+          - spec17
+        default: spec06
+      spec_apps:
+        description: "要运行的 benchmark（空格分隔 base_name，留空跑全部）"
+        required: false
+        type: string
+        default: "bzip2"
+      elf_folder:
+        description: "ELF 文件目录"
+        required: false
+        type: string
+        default: "./jemalloc_elf"
+      emulator:
+        description: "Profiling / Checkpoint 使用的模拟器"
+        required: true
+        type: choice
+        options:
+          - QEMU
+          - NEMU
+        default: QEMU
+      copies:
+        description: "SMP 核心数"
+        required: false
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "4"
+        default: "2"
+      gcc_version:
+        description: "GCC 版本标记（用于 archive 命名）"
+        required: false
+        type: choice
+        options:
+          - gcc12.2.0
+          - gcc15.0.0
+          - xscc
+        default: gcc12.2.0
+      riscv_ext:
+        description: "RISC-V 扩展指令集标记"
+        required: false
+        type: choice
+        options:
+          - rv64gcb
+          - rv64gc
+          - rv64gcbv
+        default: rv64gcb
+      mode:
+        description: "运行模式"
+        required: true
+        type: choice
+        options:
+          - full_checkpoint
+          - build_bbl_only
+          - profiling_only
+          - resume_from_cluster
+          - resume_from_checkpoint
+        default: full_checkpoint
+      max_threads:
+        description: "最大并行线程数"
+        required: false
+        type: choice
+        options:
+          - "1"
+          - "4"
+          - "8"
+          - "16"
+          - "32"
+          - "70"
+        default: "8"
+      special_flag:
+        description: "Archive 特殊标记"
+        required: false
+        type: string
+        default: "ci_checkpoint"
+      group:
+        description: "Archive 分组名"
+        required: false
+        type: string
+        default: "cigroup"
+      archive_id:
+        description: "已有 Archive ID（resume 模式必填，新建留空）"
+        required: false
+        type: string
+      env_script:
+        description: "环境初始化脚本路径"
+        required: false
+        type: string
+        default: "/nfs/home/share/workload_env/env.sh"
+      riscv_rootfs_home:
+        description: "RISCV_ROOTFS_HOME 路径覆盖（留空使用环境默认值）"
+        required: false
+        type: string
+
+jobs:
+  generate-checkpoint:
+    runs-on: self-hosted
+    timeout-minutes: 1440
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate config
+        working-directory: checkpoint_scripts
+        run: |
+          python3 <<'PYEOF'
+          import yaml
+
+          mode = "${{ github.event.inputs.mode }}"
+          spec_apps = "${{ github.event.inputs.spec_apps }}".strip()
+          archive_id = "${{ github.event.inputs.archive_id }}".strip() or None
+
+          config = {
+              "base_config": {
+                  "message": "${{ github.event.inputs.note }}",
+                  "spec_app_list": None,
+                  "spec_apps": spec_apps if spec_apps else None,
+                  "elf_folder": "${{ github.event.inputs.elf_folder }}",
+                  "times": "1,1,1",
+                  "start_id": "0,0,0",
+                  "emulator": "${{ github.event.inputs.emulator }}",
+                  "build_bbl_only": mode == "build_bbl_only",
+                  "max_threads": int("${{ github.event.inputs.max_threads }}"),
+                  "CPU2017": "${{ github.event.inputs.spec_suite }}" == "spec17",
+                  "generate_rootfs_script_only": False,
+                  "copies": int("${{ github.event.inputs.copies }}"),
+                  "archive_id": archive_id,
+                  "redirect_output": False,
+                  "cpu_bind": 0,
+                  "mem_bind": 0,
+                  "bootloader": "opensbi",
+                  "all_in_one_workload": True,
+                  "boot_for_test": False,
+                  "enable_h_ext": False,
+              },
+              "archive_id_config": {
+                  "gcc_version": "${{ github.event.inputs.gcc_version }}",
+                  "riscv_ext": "${{ github.event.inputs.riscv_ext }}",
+                  "base_or_fixed": "base",
+                  "special_flag": "${{ github.event.inputs.special_flag }}",
+                  "group": "${{ github.event.inputs.group }}",
+              }
+          }
+
+          if mode in ("resume_from_cluster", "resume_from_checkpoint"):
+              config["base_config"]["resume_after"] = mode.replace("resume_from_", "")
+
+          with open("config_ci.yaml", "w") as f:
+              yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+          print("=== Generated config_ci.yaml ===")
+          print(yaml.dump(config, default_flow_style=False))
+          PYEOF
+
+      - name: Run checkpoint pipeline
+        working-directory: checkpoint_scripts
+        env:
+          ENV_SCRIPT: ${{ github.event.inputs.env_script }}
+          RISCV_ROOTFS_OVERRIDE: ${{ github.event.inputs.riscv_rootfs_home }}
+          CHECKPOINT_MODE: ${{ github.event.inputs.mode }}
+        run: |
+          source "$ENV_SCRIPT"
+          [[ -n "$RISCV_ROOTFS_OVERRIDE" ]] && export RISCV_ROOTFS_HOME="$RISCV_ROOTFS_OVERRIDE"
+          bash run_full_checkpoint.sh config_ci.yaml
+
+      - name: Generate summary
+        if: always()
+        working-directory: checkpoint_scripts
+        run: |
+          ARCHIVE=$(ls -dt archive/*/ 2>/dev/null | head -1)
+          if [[ -z "$ARCHIVE" ]]; then
+            echo "## ⚠️ 未找到 Archive 输出" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ARCHIVE="${ARCHIVE%/}"
+
+          {
+            echo "## Checkpoint 结果"
+            echo ""
+            echo "| 配置项 | 值 |"
+            echo "|--------|----|"
+            echo "| Archive | \`$ARCHIVE\` |"
+            echo "| 模式 | \`${{ github.event.inputs.mode }}\` |"
+            echo "| 模拟器 | \`${{ github.event.inputs.emulator }}\` |"
+            echo "| SPEC | \`${{ github.event.inputs.spec_suite }}\` |"
+            echo "| Benchmarks | \`${{ github.event.inputs.spec_apps }}\` |"
+            echo "| Copies | \`${{ github.event.inputs.copies }}\` |"
+            echo ""
+            echo "### 各 Workload 结果"
+            echo "| Workload | Profiling | Cluster | Checkpoints | Size |"
+            echo "|----------|-----------|---------|-------------|------|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for app in $(ls "$ARCHIVE/gcpt_bins/" 2>/dev/null); do
+            prof="❌"; clust="❌"; ncpt="-"; sz="-"
+            [[ -f "$ARCHIVE/profiling-0/$app/simpoint_bbv.gz" ]] && \
+              prof="✅ $(du -h "$ARCHIVE/profiling-0/$app/simpoint_bbv.gz" | cut -f1)"
+            [[ -f "$ARCHIVE/cluster-0-0/$app/simpoints0" ]] && \
+              clust="✅ $(wc -l < "$ARCHIVE/cluster-0-0/$app/simpoints0") pts"
+            if [[ -d "$ARCHIVE/checkpoint-0-0-0/$app" ]]; then
+              ncpt=$(find "$ARCHIVE/checkpoint-0-0-0/$app" -name "*.gz" -type f | wc -l)
+              sz=$(du -sh "$ARCHIVE/checkpoint-0-0-0/$app" | cut -f1)
+            fi
+            echo "| \`$app\` | $prof | $clust | $ncpt | $sz |" >> "$GITHUB_STEP_SUMMARY"
+          done

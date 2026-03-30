@@ -1,0 +1,17 @@
+# 运行产物
+checkpoint_scripts/archive/
+checkpoint_scripts/__pycache__/
+checkpoint_scripts/full_checkpoint_run.log
+checkpoint_scripts/jemalloc_elf/
+riscv-rootfs/
+
+# 临时测试配置
+checkpoint_scripts/config_test.yaml
+checkpoint_scripts/config_full_test.yaml
+checkpoint_scripts/config_full_checkpoint.yaml
+checkpoint_scripts/config_standalone_test.yaml
+checkpoint_scripts/config_ci.yaml
+checkpoint_scripts/custom_app.json
+
+# IDE
+.vscode/
