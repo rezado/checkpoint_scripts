@@ -76,7 +76,10 @@ class GlobalConfigCtx(BaseConfig):
         self.__archive_id_config = self.__user_config["archive_id_config"]
 
         # load spec app info
-        if self.__base_config["CPU2017"]:
+        custom_app_json = self.__base_config.get("custom_app_json")
+        if custom_app_json:
+            self.__spec_app_info = super().load_yaml(custom_app_json)
+        elif self.__base_config["CPU2017"]:
             self.__spec_app_info = super().load_yaml("spec_info/spec17.json")
         else:
             self.__spec_app_info = super().load_yaml("spec_info/spec06.json")
@@ -148,7 +151,9 @@ class GlobalConfigCtx(BaseConfig):
         archive_id_config = self.__archive_id_config
         time = datetime.now().strftime("%Y-%m-%d-%H-%M")
 
-        if base_config["CPU2017"]:
+        if base_config.get("custom_app_json"):
+            spec_20xx = "custom"
+        elif base_config["CPU2017"]:
             spec_20xx = "spec17"
         else:
             spec_20xx = "spec06"
