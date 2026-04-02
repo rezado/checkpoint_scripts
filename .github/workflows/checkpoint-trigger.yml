@@ -1,347 +1,65 @@
-name: Checkpoint Generation
+name: Single Bin Checkpoint
 
-run-name: "${{ github.event.inputs.note }} - ${{ github.event.inputs.benchmark_type }} - ${{ github.event.inputs.benchmarks }} - copies=${{ github.event.inputs.copies }} - ${{ github.event.inputs.mode }}"
+run-name: "single-bin checkpoint: ${{ github.event.inputs.name }}"
 
 on:
   workflow_dispatch:
     inputs:
-      note:
-        description: Test note, will be displayed in the title
-        required: false
+      name:
+        description: Workload name used by the checkpoint flow
+        required: true
         type: string
-        default: Checkpoint Generation
-      benchmark_type:
-        description: Benchmark type
-        required: false
-        type: choice
-        options:
-          - gcc12-spec06
-          - gcc15-spec06
-          - xscc-spec06
-          - gcc12-spec17
-          - gcc15-spec17
-          - xscc-spec17
-          - custom
-        default: gcc12-spec06
-      benchmarks:
-        description: Specific benchmarks to run (comma-separated), leave empty for all
-        required: false
-        type: string
-        default: bzip2_chicken
-      elf_folder:
-        description: ELF binary directory
-        required: false
-        type: string
-        default: ./jemalloc_elf
-      emulator:
-        description: Emulator for profiling and checkpoint
-        required: false
-        type: choice
-        options:
-          - QEMU
-          - NEMU
-        default: QEMU
-      copies:
-        description: SMP core count (1=single-core)
-        required: false
-        type: choice
-        options:
-          - "1"
-          - "2"
-          - "3"
-        default: "1"
-      riscv_ext:
-        description: RISC-V ISA extension tag
-        required: false
-        type: choice
-        options:
-          - rv64gcb
-          - rv64gc
-          - rv64gcbv
-        default: rv64gcb
-      mode:
-        description: Execution mode
-        required: false
-        type: choice
-        options:
-          - full_checkpoint
-          - build_only
-          - profiling_only
-        default: full_checkpoint
-      max_threads:
-        description: Max parallel threads
-        required: false
-        type: choice
-        options:
-          - "1"
-          - "4"
-          - "8"
-          - "16"
-          - "32"
-          - "70"
-        default: "8"
-      boot_for_test:
-        description: Test-boot after build
-        required: false
-        type: boolean
-        default: true
-      special_flag:
-        description: Archive special tag
-        required: false
-        type: string
-        default: ci_checkpoint
-      group:
-        description: Archive group name
-        required: false
-        type: string
-        default: cigroup
-      archive_id:
-        description: Existing archive ID for resume, leave empty for new run
-        required: false
-        type: string
-      json_path:
-        description: Custom app JSON file path. Ignore unless benchmark_type is custom
-        required: false
-        type: string
-      custom_elf_path:
-        description: Custom ELF directory. Ignore unless benchmark_type is custom
-        required: false
-        type: string
-      env_script:
-        description: Environment init script path
-        required: false
-        type: string
-        default: /nfs/home/share/workload_env/env.sh
-      riscv_rootfs_home:
-        description: RISCV_ROOTFS_HOME override, leave empty to use repo riscv-rootfs
-        required: false
+      bin:
+        description: Absolute path to a GCPT-bootable bin on the self-hosted runner
+        required: true
         type: string
 
 jobs:
-  generate-checkpoint:
+  run-single-bin-checkpoint:
     runs-on: self-hosted
     timeout-minutes: 1440
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate config
+      - name: Run single-bin checkpoint flow
         working-directory: checkpoint_scripts
-        run: |
-          python3 <<'PYEOF'
-          import yaml, sys
-
-          benchmark_type = "${{ github.event.inputs.benchmark_type }}"
-          benchmarks = "${{ github.event.inputs.benchmarks }}".strip()
-          archive_id = "${{ github.event.inputs.archive_id }}".strip() or None
-          copies = int("${{ github.event.inputs.copies }}")
-          mode = "${{ github.event.inputs.mode }}"
-          json_path = "${{ github.event.inputs.json_path }}".strip()
-          custom_elf_path = "${{ github.event.inputs.custom_elf_path }}".strip()
-
-          # Parse benchmark_type
-          gcc_map = {"gcc12": "gcc12.2.0", "gcc15": "gcc15.0.0", "xscc": "xscc"}
-          custom_app_json_path = None
-
-          if benchmark_type == "custom":
-              if not json_path:
-                  print("ERROR: json_path is required when benchmark_type is custom")
-                  sys.exit(1)
-              custom_app_json_path = json_path
-              gcc_version = "gcc12.2.0"
-              cpu2017 = False
-              # Read app names from JSON if benchmarks is empty
-              if not benchmarks:
-                  import json
-                  with open(json_path) as f:
-                      benchmarks = ",".join(json.load(f).keys())
-          else:
-              parts = benchmark_type.split("-")
-              gcc_version = gcc_map.get(parts[0], parts[0])
-              cpu2017 = "spec17" in parts[1]
-
-          # Set times and build_bbl_only based on mode
-          if mode == "full_checkpoint":
-              times = "1,1,1"
-              build_bbl_only = False
-          elif mode == "build_only":
-              times = "0,0,0"
-              build_bbl_only = True
-          elif mode == "profiling_only":
-              times = "1,0,0"
-              build_bbl_only = False
-          else:
-              print(f"ERROR: unknown mode '{mode}'")
-              sys.exit(1)
-
-          if archive_id:
-              build_bbl_only = False
-
-          elf_folder = custom_elf_path if custom_elf_path else "${{ github.event.inputs.elf_folder }}"
-
-          config = {
-              "base_config": {
-                  "message": "${{ github.event.inputs.note }}",
-                  "spec_app_list": None,
-                  "spec_apps": benchmarks if benchmarks else None,
-                  "elf_folder": elf_folder,
-                  "times": times,
-                  "start_id": "0,0,0",
-                  "emulator": "${{ github.event.inputs.emulator }}",
-                  "build_bbl_only": build_bbl_only,
-                  "max_threads": int("${{ github.event.inputs.max_threads }}"),
-                  "CPU2017": cpu2017,
-                  "custom_app_json": custom_app_json_path,
-                  "generate_rootfs_script_only": False,
-                  "copies": copies,
-                  "archive_id": archive_id,
-                  "redirect_output": False,
-                  "cpu_bind": 0,
-                  "mem_bind": 0,
-                  "bootloader": "opensbi",
-                  "all_in_one_workload": True,
-                  "boot_for_test": "${{ github.event.inputs.boot_for_test }}" == "true",
-                  "enable_h_ext": False,
-              },
-              "archive_id_config": {
-                  "gcc_version": gcc_version,
-                  "riscv_ext": "${{ github.event.inputs.riscv_ext }}",
-                  "base_or_fixed": "base",
-                  "special_flag": "${{ github.event.inputs.special_flag }}",
-                  "group": "${{ github.event.inputs.group }}",
-              }
-          }
-
-          with open("config_ci.yaml", "w") as f:
-              yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-
-          print("=== Generated config_ci.yaml ===")
-          print(yaml.dump(config, default_flow_style=False))
-          print(f"Mode: {mode}, Times: {times}, Copies: {copies}, Benchmark: {benchmark_type}")
-          PYEOF
-
-      - name: Setup environment
+        shell: bash
         run: |
           set -euo pipefail
-          source "${{ github.event.inputs.env_script }}"
 
-          COPIES="${{ github.event.inputs.copies }}"
+          ENV_SCRIPT="/nfs/home/share/workload_env/env.sh"
+          if [[ ! -r "$ENV_SCRIPT" ]]; then
+            echo "ERROR: missing environment script: $ENV_SCRIPT"
+            exit 1
+          fi
+          source "$ENV_SCRIPT"
 
-          # Single-core vs multi-core: switch FDT and GCPT
-          if [[ "$COPIES" == "1" ]]; then
-            export XIANGSHAN_FDT=/nfs/home/share/workload_env/workload_build_env/dts/build/xiangshan.dtb
-            export GCPT_HOME=/nfs/home/share/workload_env/LibCheckpointAlpha
-            echo "INFO: Single-core mode - xiangshan.dtb + LibCheckpointAlpha"
-          else
-            echo "INFO: Multi-core mode (copies=$COPIES) - xiangshan_dualcore.dtb + LibCheckpoint"
+          BIN_PATH="${{ github.event.inputs.bin }}"
+          WORKLOAD_NAME="${{ github.event.inputs.name }}"
+          ARCHIVE_STAMP="$(date +%Y%m%d-%H%M%S)"
+          ARCHIVE_SAFE_NAME="$(printf '%s' "$WORKLOAD_NAME" | tr -cs 'A-Za-z0-9._-' '-')"
+          ARCHIVE_ID="gha-${ARCHIVE_SAFE_NAME}-${ARCHIVE_STAMP}"
+
+          if [[ ! -f "$BIN_PATH" ]]; then
+            echo "ERROR: input bin does not exist: $BIN_PATH"
+            exit 1
           fi
 
-          # RISCV_ROOTFS_HOME: user override > repo riscv-rootfs
-          ROOTFS_OVERRIDE="${{ github.event.inputs.riscv_rootfs_home }}"
-          if [[ -n "$ROOTFS_OVERRIDE" ]]; then
-            export RISCV_ROOTFS_HOME="$ROOTFS_OVERRIDE"
-          else
-            export RISCV_ROOTFS_HOME="$GITHUB_WORKSPACE/riscv-rootfs"
-          fi
+          echo "INFO: workload=$WORKLOAD_NAME"
+          echo "INFO: bin=$BIN_PATH"
+          echo "INFO: archive_id=$ARCHIVE_ID"
 
-          # Validate required paths
-          FAIL=false
-          for var in NEMU_HOME QEMU_HOME LINUX_HOME OPENSBI_HOME GCPT_HOME RISCV_ROOTFS_HOME XIANGSHAN_FDT; do
-            val="${!var}"
-            if [[ ! -e "$val" ]]; then
-              echo "ERROR: $var=$val does not exist"
-              FAIL=true
-            else
-              echo "  $var=$val"
-            fi
-          done
-          $FAIL && exit 1
-
-          # Verify rootfs build binaries
-          for f in before_workload trap qemu_trap busybox; do
-            fpath="$RISCV_ROOTFS_HOME/rootfsimg/build/$f"
-            if [[ ! -e "$fpath" ]]; then
-              echo "ERROR: $fpath does not exist or is a broken symlink"
-              FAIL=true
-            fi
-          done
-          $FAIL && exit 1
-
-          # Export for subsequent steps
-          {
-            echo "NEMU_HOME=$NEMU_HOME"
-            echo "QEMU_HOME=$QEMU_HOME"
-            echo "LINUX_HOME=$LINUX_HOME"
-            echo "OPENSBI_HOME=$OPENSBI_HOME"
-            echo "GCPT_HOME=$GCPT_HOME"
-            echo "RISCV_ROOTFS_HOME=$RISCV_ROOTFS_HOME"
-            echo "XIANGSHAN_FDT=$XIANGSHAN_FDT"
-            echo "RISCV=$RISCV"
-            echo "CROSS_COMPILE=$CROSS_COMPILE"
-            echo "ARCH=$ARCH"
-            echo "CPU2006_RUN_DIR=$CPU2006_RUN_DIR"
-            echo "CPU2017_RUN_DIR=${CPU2017_RUN_DIR:-}"
-          } >> "$GITHUB_ENV"
-
-      - name: Run generate_checkpoint.py
-        working-directory: checkpoint_scripts
-        run: |
-          set -euo pipefail
-          echo "========== Starting Checkpoint Pipeline =========="
-          echo "  Benchmark: ${{ github.event.inputs.benchmark_type }}"
-          echo "  Mode: ${{ github.event.inputs.mode }}"
-          echo "  Emulator: ${{ github.event.inputs.emulator }}"
-          echo "  Copies: ${{ github.event.inputs.copies }}"
-          echo "  RISCV_ROOTFS_HOME=$RISCV_ROOTFS_HOME"
-          echo "  GCPT_HOME=$GCPT_HOME"
-          echo ""
-          python3 generate_checkpoint.py --config config_ci.yaml 2>&1 | tee checkpoint_run.log
-
-      - name: Generate summary
-        if: always()
-        working-directory: checkpoint_scripts
-        run: |
-          ARCHIVE=$(ls -dt archive/*/ 2>/dev/null | head -1)
-          if [[ -z "$ARCHIVE" ]]; then
-            echo "## :warning: No archive output found" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          ARCHIVE="${ARCHIVE%/}"
+          bash run_single_bin_checkpoint.sh \
+            --bin "$BIN_PATH" \
+            --name "$WORKLOAD_NAME" \
+            --archive-id "$ARCHIVE_ID"
 
           {
-            echo "## Checkpoint Results"
+            echo "## Single-Bin Checkpoint Result"
             echo ""
-            echo "| Config | Value |"
-            echo "|--------|-------|"
-            echo "| Archive | \`$ARCHIVE\` |"
-            echo "| Benchmark | \`${{ github.event.inputs.benchmark_type }}\` |"
-            echo "| Mode | \`${{ github.event.inputs.mode }}\` |"
-            echo "| Emulator | \`${{ github.event.inputs.emulator }}\` |"
-            echo "| Benchmarks | \`${{ github.event.inputs.benchmarks }}\` |"
-            echo "| Copies | \`${{ github.event.inputs.copies }}\` |"
-            echo ""
-            echo "### Per-Workload Results"
-            echo ""
-            echo "| Workload | Build | Profiling | Cluster | Checkpoints | Size |"
-            echo "|----------|-------|-----------|---------|-------------|------|"
+            echo "- name: \`$WORKLOAD_NAME\`"
+            echo "- bin: \`$BIN_PATH\`"
+            echo "- archive_id: \`$ARCHIVE_ID\`"
+            echo "- archive_dir: \`$GITHUB_WORKSPACE/checkpoint_scripts/archive/$ARCHIVE_ID\`"
           } >> "$GITHUB_STEP_SUMMARY"
-
-          for app in $(ls "$ARCHIVE/gcpt_bins/" 2>/dev/null); do
-            build=":x:"; prof="-"; clust="-"; ncpt="-"; sz="-"
-
-            [[ -f "$ARCHIVE/gcpt_bins/$app" ]] && \
-              build=":white_check_mark: $(du -h "$ARCHIVE/gcpt_bins/$app" | cut -f1)"
-
-            [[ -f "$ARCHIVE/profiling-0/$app/simpoint_bbv.gz" ]] && \
-              prof=":white_check_mark: $(du -h "$ARCHIVE/profiling-0/$app/simpoint_bbv.gz" | cut -f1)"
-
-            [[ -f "$ARCHIVE/cluster-0-0/$app/simpoints0" ]] && \
-              clust=":white_check_mark: $(wc -l < "$ARCHIVE/cluster-0-0/$app/simpoints0") pts"
-
-            if [[ -d "$ARCHIVE/checkpoint-0-0-0/$app" ]]; then
-              ncpt=$(find "$ARCHIVE/checkpoint-0-0-0/$app" -name "*.gz" -type f | wc -l)
-              sz=$(du -sh "$ARCHIVE/checkpoint-0-0-0/$app" | cut -f1)
-            fi
-
-            echo "| \`$app\` | $build | $prof | $clust | $ncpt | $sz |" >> "$GITHUB_STEP_SUMMARY"
-          done

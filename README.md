@@ -134,6 +134,34 @@ archive_id_config: # 配置生成的 archive id，仅影响结果放置在哪里
 ```
 python3 generate_checkpoint.py --config config.yaml
 ```
+- 单 bin 一键 checkpoint
+    - 适用场景：已经有一个可直接启动的 GCPT bin，希望直接对这个 bin 执行完整的 `profiling -> cluster -> checkpoint` 流程
+    - 这条路径固定使用 NEMU，不会重新编译 Linux、rootfs、OpenSBI 或 workload
+    - 输入文件必须是可以直接启动的 GCPT bin，而不是普通 ELF 或裸 bin
+    - 运行前至少需要保证 `NEMU_HOME` 已设置，且 `riscv64-nemu-interpreter` 与 `simpoint` 已正确构建
+
+```
+bash checkpoint_scripts/run_single_bin_checkpoint.sh \
+  --bin /path/to/your.bin \
+  --name your_workload \
+  --archive-id your_archive_id
+```
+
+    - 参数说明
+        - `--bin`：输入 bin 的路径，必填
+        - `--name`：workload 名称，必填，会同时用于结果目录名
+        - `--archive-id`：输出 archive 名称，可选；不指定时会自动生成
+        - `--interval`：checkpoint 间隔，可选，默认 `20000000`
+        - `--copies`：核数，可选，默认 `1`
+        - `--resume-after profiling|cluster`：从已有 profiling 或 cluster 结果继续执行，可选
+
+    - 示例
+```
+bash checkpoint_scripts/run_single_bin_checkpoint.sh \
+  --bin /nfs/home/wujiabin/work/checkpoint_scripts/checkpoint_scripts/archive/custom_gcc12.2.0_rv64gcb_base_custom_test_QEMU_testgroup_2026-03-31-17-19/gcpt_bins/my_bzip2 \
+  --name my_bzip2 \
+  --archive-id my-bzip2-run
+```
 - 导出 checkpoint list 和权重文件
     - 修改 dump_result.py 文件中的 spec_list，base_path
     - 运行该脚本，随后会在 checkpoint 目录下生成 list 文件和 权重文件
