@@ -154,6 +154,9 @@ bash checkpoint_scripts/run_single_bin_checkpoint.sh \
         - `--interval`：checkpoint 间隔，可选，默认 `20000000`
         - `--copies`：核数，可选，默认 `1`
         - `--resume-after profiling|cluster`：从已有 profiling 或 cluster 结果继续执行，可选
+    - GitHub Action 手动触发
+        - 目前支持输入 `name`、`bin`、`interval`
+        - `interval` 需要填写正整数；默认值为 `20000000`
 
     - 示例
 ```
