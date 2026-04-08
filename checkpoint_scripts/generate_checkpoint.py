@@ -8,11 +8,16 @@ import subprocess
 import concurrent.futures
 from concurrent.futures import Future
 from generate_bbl import RootfsBuilder
+from checkpoint_postprocess import generate_checkpoint_metadata
 from take_checkpoint import TakeCheckpointConfig
 from take_checkpoint import generate_command
 from take_checkpoint import level_first_exec
 from config import BaseConfig
 from typing import List, Tuple
+
+
+def parse_id_triplet(value: str) -> List[int]:
+    return [int(item) for item in value.split(",")]
 
 
 def entrys(path):
@@ -188,6 +193,8 @@ def main(config_ctx: GlobalConfigCtx):
 
     # get take checkpoint config
     take_checkpoint_config = take_checkpoint_config_obj.get_config()
+    start_ids = parse_id_triplet(base_config["start_id"])
+    times = parse_id_triplet(base_config["times"])
 
     # create rootfs builder
     if base_config["bootloader"] == "opensbi":
@@ -268,11 +275,17 @@ def main(config_ctx: GlobalConfigCtx):
 
             spec_app_execute_list.append(root_noods)
 
-        if spec_app_execute_list is not []:
+        if spec_app_execute_list:
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=base_config["max_threads"]) as e:
 #                futures = [e.submit(level_first_exec, task) for task in spec_app_execute_list]
                 e.map(level_first_exec, spec_app_execute_list)
+            generate_checkpoint_metadata(
+                archive_root=archive_buffer_layout["buffer_path"],
+                workloads=spec_app_list,
+                times=times,
+                ids=start_ids,
+            )
 
     # if set already exists archive id, will start checkpoint immidiatly, but archive must have valid binary file
     else:
@@ -297,9 +310,16 @@ def main(config_ctx: GlobalConfigCtx):
             #            list(map(print_tree, root_noods))
             spec_app_execute_list.append(root_noods)
 
-        with concurrent.futures.ProcessPoolExecutor(
-                max_workers=base_config["max_threads"]) as e:
-                e.map(level_first_exec, spec_app_execute_list)
+        if spec_app_execute_list:
+            with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=base_config["max_threads"]) as e:
+                    e.map(level_first_exec, spec_app_execute_list)
+            generate_checkpoint_metadata(
+                archive_root=archive_buffer_layout["buffer_path"],
+                workloads=spec_app_list,
+                times=times,
+                ids=start_ids,
+            )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

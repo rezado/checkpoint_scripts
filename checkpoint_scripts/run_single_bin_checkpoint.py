@@ -3,6 +3,7 @@ import os
 import shutil
 from datetime import datetime
 
+from checkpoint_postprocess import generate_checkpoint_metadata
 from take_checkpoint import TakeCheckpointConfig
 from take_checkpoint import generate_command
 from take_checkpoint import level_first_exec
@@ -221,6 +222,12 @@ def main() -> int:
 
     level_first_exec(root)
     validate_outputs(archive_root, args.name)
+    generate_checkpoint_metadata(
+        archive_root=archive_root,
+        workloads=[args.name],
+        times=[1, 1, 1],
+        ids=[0, 0, 0],
+    )
 
     checkpoint_count = count_checkpoints(archive_root, args.name)
     checkpoint_dir = os.path.join(archive_root, "checkpoint-0-0-0", args.name)

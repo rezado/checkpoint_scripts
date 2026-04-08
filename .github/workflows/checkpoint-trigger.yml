@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       name:
-        description: Workload name used by the checkpoint flow
+        description: Workload name
         required: true
         type: string
       bin:
-        description: Absolute path to a GCPT-bootable bin on the self-hosted runner
+        description: Absolute path to a GCPT-bootable bin
         required: true
         type: string
       interval:
@@ -45,7 +45,7 @@ jobs:
           INTERVAL="${{ github.event.inputs.interval }}"
           ARCHIVE_STAMP="$(date +%Y%m%d-%H%M%S)"
           ARCHIVE_SAFE_NAME="$(printf '%s' "$WORKLOAD_NAME" | tr -cs 'A-Za-z0-9._-' '-')"
-          ARCHIVE_ID="gha-${ARCHIVE_SAFE_NAME}-${ARCHIVE_STAMP}"
+          ARCHIVE_ID="${ARCHIVE_SAFE_NAME}-${ARCHIVE_STAMP}"
 
           if [[ ! -f "$BIN_PATH" ]]; then
             echo "ERROR: input bin does not exist: $BIN_PATH"
