@@ -3,8 +3,19 @@
 set -x
 set -o errexit
 
+USER_NEMU_HOME="${NEMU_HOME:-}"
+USER_NEMU_DEFCONFIG="${NEMU_DEFCONFIG:-}"
+
 # shellcheck source=prepare_env.sh
 source prepare_env.sh
+
+if [ -n "$USER_NEMU_HOME" ]; then
+  NEMU_HOME="$USER_NEMU_HOME"
+  export NEMU_HOME
+fi
+
+NEMU_DEFCONFIG="${USER_NEMU_DEFCONFIG:-riscv64-xs-cpt_defconfig}"
+export NEMU_DEFCONFIG
 
 ENV_HOME="$(pwd)"
 export ENV_HOME
@@ -69,8 +80,16 @@ fi
 
 build_NEMU ()
 {
+  if [ ! -d "$NEMU_HOME" ]; then
+    echo "ERROR: NEMU_HOME does not exist: $NEMU_HOME"
+    exit 1
+  fi
+  if [ -z "$NEMU_DEFCONFIG" ]; then
+    echo "ERROR: NEMU_DEFCONFIG must not be empty"
+    exit 1
+  fi
   cd "$NEMU_HOME"
-  make riscv64-xs-cpt_defconfig
+  make "$NEMU_DEFCONFIG"
   make -j
   git submodule update --init
   cd "$NEMU_HOME/resource/gcpt_restore" && make -j
@@ -86,4 +105,3 @@ fi
 if [ -n "$LINK_PAYLOAD" ]; then
   build_GCPT_PAYLOAD "$LINK_PAYLOAD"
 fi
-

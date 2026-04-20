@@ -1,22 +1,40 @@
-name: Single Bin Checkpoint
+name: Checkpoint
 
-run-name: "single-bin checkpoint: ${{ github.event.inputs.name }}"
+run-name: "checkpoint: ${{ github.event.inputs.name || github.event.inputs.bin_list || github.event.inputs.bin }}"
 
 on:
   workflow_dispatch:
     inputs:
       name:
-        description: Workload name
-        required: true
+        description: Workload name, required only for single-bin mode
+        required: false
         type: string
       bin:
-        description: Absolute path to a GCPT-bootable bin
-        required: true
+        description: Absolute path to a GCPT-bootable bin for single-bin mode
+        required: false
+        type: string
+      bin_list:
+        description: Absolute path to a text file listing one bin path per line
+        required: false
         type: string
       interval:
         description: Checkpoint interval
         required: false
         default: "20000000"
+        type: string
+      rebuild_nemu:
+        description: Rebuild only NEMU before running the checkpoint flow
+        required: false
+        default: "false"
+        type: boolean
+      nemu_home:
+        description: Optional NEMU directory override
+        required: false
+        type: string
+      nemu_defconfig:
+        description: Defconfig used when rebuilding NEMU
+        required: false
+        default: "riscv64-xs-cpt_defconfig"
         type: string
 
 jobs:
@@ -27,7 +45,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run single-bin checkpoint flow
+      - name: Run checkpoint flow
         working-directory: checkpoint_scripts
         shell: bash
         run: |
@@ -41,14 +59,28 @@ jobs:
           source "$ENV_SCRIPT"
 
           BIN_PATH="${{ github.event.inputs.bin }}"
+          BIN_LIST_PATH="${{ github.event.inputs.bin_list }}"
           WORKLOAD_NAME="${{ github.event.inputs.name }}"
           INTERVAL="${{ github.event.inputs.interval }}"
-          ARCHIVE_STAMP="$(date +%Y%m%d-%H%M%S)"
-          ARCHIVE_SAFE_NAME="$(printf '%s' "$WORKLOAD_NAME" | tr -cs 'A-Za-z0-9._-' '-')"
-          ARCHIVE_ID="${ARCHIVE_SAFE_NAME}-${ARCHIVE_STAMP}"
+          REBUILD_NEMU="${{ github.event.inputs.rebuild_nemu }}"
+          NEMU_OVERRIDE_HOME="${{ github.event.inputs.nemu_home }}"
+          NEMU_DEFCONFIG="${{ github.event.inputs.nemu_defconfig }}"
 
-          if [[ ! -f "$BIN_PATH" ]]; then
-            echo "ERROR: input bin does not exist: $BIN_PATH"
+          if [[ -n "$NEMU_OVERRIDE_HOME" ]]; then
+            if [[ ! -d "$NEMU_OVERRIDE_HOME" ]]; then
+              echo "ERROR: NEMU override directory does not exist: $NEMU_OVERRIDE_HOME"
+              exit 1
+            fi
+            export NEMU_HOME="$NEMU_OVERRIDE_HOME"
+          fi
+
+          if [[ -n "$BIN_PATH" && -n "$BIN_LIST_PATH" ]]; then
+            echo "ERROR: provide either 'bin' or 'bin_list', not both"
+            exit 1
+          fi
+
+          if [[ -z "$BIN_PATH" && -z "$BIN_LIST_PATH" ]]; then
+            echo "ERROR: either 'bin' or 'bin_list' must be provided"
             exit 1
           fi
 
@@ -57,23 +89,94 @@ jobs:
             exit 1
           fi
 
-          echo "INFO: workload=$WORKLOAD_NAME"
-          echo "INFO: bin=$BIN_PATH"
-          echo "INFO: interval=$INTERVAL"
-          echo "INFO: archive_id=$ARCHIVE_ID"
+          if [[ "$REBUILD_NEMU" == "true" ]]; then
+            if [[ -z "$NEMU_HOME" ]]; then
+              echo "ERROR: NEMU_HOME is not set after loading env.sh"
+              exit 1
+            fi
+            if [[ ! -d "$NEMU_HOME" ]]; then
+              echo "ERROR: NEMU_HOME does not exist: $NEMU_HOME"
+              exit 1
+            fi
+            if [[ -z "$NEMU_DEFCONFIG" ]]; then
+              echo "ERROR: nemu_defconfig must not be empty when rebuilding NEMU"
+              exit 1
+            fi
 
-          bash run_single_bin_checkpoint.sh \
-            --bin "$BIN_PATH" \
-            --name "$WORKLOAD_NAME" \
-            --archive-id "$ARCHIVE_ID" \
-            --interval "$INTERVAL"
+            echo "INFO: rebuilding NEMU at $NEMU_HOME"
+            echo "INFO: nemu_defconfig=$NEMU_DEFCONFIG"
+            (
+              cd "$NEMU_HOME"
+              make "$NEMU_DEFCONFIG"
+              make -j
+              git submodule update --init
+              cd "$NEMU_HOME/resource/gcpt_restore" && make -j
+              cd "$NEMU_HOME/resource/simpoint/simpoint_repo" && make -j
+            )
+          fi
 
-          {
-            echo "## Single-Bin Checkpoint Result"
-            echo ""
-            echo "- name: \`$WORKLOAD_NAME\`"
-            echo "- bin: \`$BIN_PATH\`"
-            echo "- interval: \`$INTERVAL\`"
-            echo "- archive_id: \`$ARCHIVE_ID\`"
-            echo "- archive_dir: \`$GITHUB_WORKSPACE/checkpoint_scripts/archive/$ARCHIVE_ID\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "$BIN_PATH" ]]; then
+            ARCHIVE_STAMP="$(date +%Y%m%d-%H%M%S)"
+            ARCHIVE_SAFE_NAME="$(printf '%s' "$WORKLOAD_NAME" | tr -cs 'A-Za-z0-9._-' '-')"
+            ARCHIVE_ID="${ARCHIVE_SAFE_NAME}-${ARCHIVE_STAMP}"
+
+            if [[ -z "$WORKLOAD_NAME" ]]; then
+              echo "ERROR: 'name' is required when using 'bin'"
+              exit 1
+            fi
+
+            if [[ ! -f "$BIN_PATH" ]]; then
+              echo "ERROR: input bin does not exist: $BIN_PATH"
+              exit 1
+            fi
+
+            echo "INFO: workload=$WORKLOAD_NAME"
+            echo "INFO: bin=$BIN_PATH"
+            echo "INFO: interval=$INTERVAL"
+            echo "INFO: archive_id=$ARCHIVE_ID"
+
+            bash run_single_bin_checkpoint.sh \
+              --bin "$BIN_PATH" \
+              --name "$WORKLOAD_NAME" \
+              --archive-id "$ARCHIVE_ID" \
+              --interval "$INTERVAL"
+
+            {
+              echo "## Single-Bin Checkpoint Result"
+              echo ""
+              echo "- name: \`$WORKLOAD_NAME\`"
+              echo "- bin: \`$BIN_PATH\`"
+              echo "- interval: \`$INTERVAL\`"
+              echo "- archive_id: \`$ARCHIVE_ID\`"
+              echo "- archive_dir: \`$GITHUB_WORKSPACE/checkpoint_scripts/archive/$ARCHIVE_ID\`"
+              echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
+              echo "- nemu_home: \`${NEMU_OVERRIDE_HOME:-$NEMU_HOME}\`"
+              echo "- nemu_defconfig: \`$NEMU_DEFCONFIG\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            if [[ ! -f "$BIN_LIST_PATH" ]]; then
+              echo "ERROR: bin list file does not exist: $BIN_LIST_PATH"
+              exit 1
+            fi
+
+            ENTRY_COUNT="$(grep -Evc '^[[:space:]]*(#|$)' "$BIN_LIST_PATH" || true)"
+
+            echo "INFO: bin_list=$BIN_LIST_PATH"
+            echo "INFO: entries=$ENTRY_COUNT"
+            echo "INFO: interval=$INTERVAL"
+
+            bash run_single_bin_checkpoint.sh \
+              --bin-list "$BIN_LIST_PATH" \
+              --interval "$INTERVAL"
+
+            {
+              echo "## Batch Checkpoint Result"
+              echo ""
+              echo "- bin_list: \`$BIN_LIST_PATH\`"
+              echo "- entries: \`$ENTRY_COUNT\`"
+              echo "- interval: \`$INTERVAL\`"
+              echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
+              echo "- nemu_home: \`${NEMU_OVERRIDE_HOME:-$NEMU_HOME}\`"
+              echo "- nemu_defconfig: \`$NEMU_DEFCONFIG\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -94,10 +94,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description=
         "Run profiling, cluster, and checkpoint from a single GCPT bin with NEMU"
     )
-    parser.add_argument("--bin",
-                        required=True,
-                        help="Path to a GCPT-bootable bin file")
-    parser.add_argument("--name", required=True, help="Workload name")
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--bin",
+                             help="Path to a GCPT-bootable bin file")
+    input_group.add_argument(
+        "--bin-list",
+        dest="bin_list",
+        help="Path to a text file containing one GCPT-bootable bin path per line",
+    )
+    parser.add_argument("--name",
+                        help="Workload name used with --bin")
     parser.add_argument("--archive-id", help="Existing or new archive id")
     parser.add_argument("--interval",
                         type=int,
@@ -114,12 +120,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def validate_input_args(args) -> None:
-    if not os.path.isfile(args.bin):
-        raise FileNotFoundError(f"input bin does not exist: {args.bin}")
-    if not os.access(args.bin, os.R_OK):
-        raise PermissionError(f"input bin is not readable: {args.bin}")
-    if not args.name.strip():
-        raise ValueError("workload name must not be empty")
+    if args.bin and args.bin_list:
+        raise ValueError("provide exactly one of --bin or --bin-list")
+    if not args.bin and not args.bin_list:
+        raise ValueError("either --bin or --bin-list is required")
+
+    if args.bin:
+        if not os.path.isfile(args.bin):
+            raise FileNotFoundError(f"input bin does not exist: {args.bin}")
+        if not os.access(args.bin, os.R_OK):
+            raise PermissionError(f"input bin is not readable: {args.bin}")
+        if args.name is None or not args.name.strip():
+            raise ValueError("--name is required when using --bin")
+    else:
+        if not os.path.isfile(args.bin_list):
+            raise FileNotFoundError(
+                f"bin list file does not exist: {args.bin_list}")
+        if not os.access(args.bin_list, os.R_OK):
+            raise PermissionError(
+                f"bin list file is not readable: {args.bin_list}")
+        if args.name is not None:
+            raise ValueError("--name can only be used with --bin")
+        if args.archive_id is not None:
+            raise ValueError(
+                "--archive-id cannot be used with --bin-list because each bin gets its own archive"
+            )
+        if args.resume_after is not None:
+            raise ValueError(
+                "--resume-after cannot be used with --bin-list because each bin runs in a fresh archive"
+            )
+
     if args.copies < 1:
         raise ValueError("--copies must be at least 1")
     if args.interval <= 0:
@@ -163,29 +193,83 @@ def count_checkpoints(archive_root: str, workload: str) -> int:
         for name in files if name.endswith(COMPRESSED_CHECKPOINT_SUFFIXES))
 
 
-def main() -> int:
-    args = build_arg_parser().parse_args()
+def build_single_run_args(bin_path: str, workload_name: str, archive_id: str | None,
+                          interval: int, copies: int,
+                          resume_after: str | None) -> argparse.Namespace:
+    return argparse.Namespace(
+        bin=bin_path,
+        bin_list=None,
+        name=workload_name,
+        archive_id=archive_id,
+        interval=interval,
+        copies=copies,
+        resume_after=resume_after,
+    )
+
+
+def load_bin_list_entries(bin_list_path: str) -> list[dict[str, str]]:
+    entries = []
+    seen_names = set()
+
+    with open(bin_list_path, "r", encoding="utf-8") as handle:
+        for index, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            workload_name = os.path.basename(os.path.normpath(line))
+            if not workload_name:
+                raise ValueError(
+                    f"unable to derive workload name from line {index}: {line}")
+            if workload_name in seen_names:
+                raise ValueError(
+                    f"duplicate workload name derived from bin list: {workload_name}"
+                )
+
+            entries.append({"bin": line, "name": workload_name})
+            seen_names.add(workload_name)
+
+    if not entries:
+        raise ValueError(
+            f"bin list file does not contain any usable bin paths: {bin_list_path}"
+        )
+
+    return entries
+
+
+def run_single_checkpoint(*, bin_path: str, workload_name: str,
+                          archive_id: str | None, interval: int, copies: int,
+                          resume_after: str | None) -> dict[str, str | int]:
+    args = build_single_run_args(
+        bin_path=bin_path,
+        workload_name=workload_name,
+        archive_id=archive_id,
+        interval=interval,
+        copies=copies,
+        resume_after=resume_after,
+    )
     validate_input_args(args)
 
-    archive_id = args.archive_id or generate_archive_id(args.name)
-    archive_root = os.path.realpath(os.path.join("archive", archive_id))
+    resolved_archive_id = archive_id or generate_archive_id(workload_name)
+    archive_root = os.path.realpath(os.path.join("archive", resolved_archive_id))
     layout = build_archive_layout(archive_root)
     ensure_directories(layout.values())
 
     request = {
-        "bin": os.path.realpath(args.bin),
-        "name": args.name,
-        "archive_id": archive_id,
-        "interval": args.interval,
-        "copies": args.copies,
-        "resume_after": args.resume_after,
+        "bin": os.path.realpath(bin_path),
+        "name": workload_name,
+        "archive_id": resolved_archive_id,
+        "interval": interval,
+        "copies": copies,
+        "resume_after": resume_after,
     }
     metadata_path = write_request_metadata(layout["metadata"], request)
-    copied_bin = copy_input_bin(args.bin, os.path.join(layout["gcpt_bins"],
-                                                       args.name))
+    copied_bin = copy_input_bin(bin_path,
+                                os.path.join(layout["gcpt_bins"],
+                                             workload_name))
 
-    validate_resume_artifacts(archive_root, args.name, args.resume_after)
-    ensure_resume_logs(archive_root, args.name, args.resume_after)
+    validate_resume_artifacts(archive_root, workload_name, resume_after)
+    ensure_resume_logs(archive_root, workload_name, resume_after)
 
     nemu_home = os.environ.get("NEMU_HOME")
     if not nemu_home:
@@ -196,43 +280,96 @@ def main() -> int:
                                        times="1,1,1",
                                        path_env_vars_to_check=["NEMU_HOME"])
     config = take_config.get_config()
-    config["utils"]["interval"] = str(args.interval)
+    config["utils"]["interval"] = str(interval)
 
     root = generate_command(workload_folder=layout["gcpt_bins"],
-                            workload=args.name,
+                            workload=workload_name,
                             buffer=archive_root,
                             bin_suffix="",
                             emu="NEMU",
                             log_folder=layout["logs"],
                             cpu_bind="0",
                             mem_bind="0",
-                            copies=str(args.copies),
+                            copies=str(copies),
                             config=config,
-                            resume_after=args.resume_after,
+                            resume_after=resume_after,
                             all_in_one_workload=True)
     if root is None:
         raise RuntimeError("failed to generate execution tree")
 
-    print(f"Archive: {archive_id}")
+    print(f"Archive: {resolved_archive_id}")
     print(f"Input bin copied to: {copied_bin}")
     print(f"Metadata: {metadata_path}")
-    print(f"Interval: {args.interval}")
-    print(f"Copies: {args.copies}")
-    print(f"Resume after: {args.resume_after or 'fresh'}")
+    print(f"Interval: {interval}")
+    print(f"Copies: {copies}")
+    print(f"Resume after: {resume_after or 'fresh'}")
 
     level_first_exec(root)
-    validate_outputs(archive_root, args.name)
+    validate_outputs(archive_root, workload_name)
     generate_checkpoint_metadata(
         archive_root=archive_root,
-        workloads=[args.name],
+        workloads=[workload_name],
         times=[1, 1, 1],
         ids=[0, 0, 0],
     )
 
-    checkpoint_count = count_checkpoints(archive_root, args.name)
-    checkpoint_dir = os.path.join(archive_root, "checkpoint-0-0-0", args.name)
+    checkpoint_count = count_checkpoints(archive_root, workload_name)
+    checkpoint_dir = os.path.join(archive_root, "checkpoint-0-0-0",
+                                  workload_name)
     print(f"Checkpoint count: {checkpoint_count}")
     print(f"Checkpoint dir: {checkpoint_dir}")
+
+    return {
+        "name": workload_name,
+        "archive_id": resolved_archive_id,
+        "archive_root": archive_root,
+        "checkpoint_count": checkpoint_count,
+        "checkpoint_dir": checkpoint_dir,
+    }
+
+
+def main() -> int:
+    args = build_arg_parser().parse_args()
+    validate_input_args(args)
+
+    if args.bin:
+        run_single_checkpoint(bin_path=args.bin,
+                              workload_name=args.name,
+                              archive_id=args.archive_id,
+                              interval=args.interval,
+                              copies=args.copies,
+                              resume_after=args.resume_after)
+        return 0
+
+    entries = load_bin_list_entries(args.bin_list)
+    for entry in entries:
+        validate_input_args(
+            build_single_run_args(bin_path=entry["bin"],
+                                  workload_name=entry["name"],
+                                  archive_id=None,
+                                  interval=args.interval,
+                                  copies=args.copies,
+                                  resume_after=None))
+
+    print(f"Batch size: {len(entries)}")
+    results = []
+    for index, entry in enumerate(entries, start=1):
+        print(
+            f"=== [{index}/{len(entries)}] Checkpointing {entry['name']} from {entry['bin']} ==="
+        )
+        result = run_single_checkpoint(bin_path=entry["bin"],
+                                       workload_name=entry["name"],
+                                       archive_id=None,
+                                       interval=args.interval,
+                                       copies=args.copies,
+                                       resume_after=None)
+        results.append(result)
+
+    print("Batch summary:")
+    for result in results:
+        print(
+            f"- {result['name']}: archive={result['archive_id']}, checkpoints={result['checkpoint_count']}, dir={result['checkpoint_dir']}"
+        )
     return 0
 
 

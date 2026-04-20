@@ -56,6 +56,58 @@ class SingleBinCheckpointTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args([])
 
+    def test_load_bin_list_entries_ignores_comments_and_uses_file_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bins"
+            bin_dir.mkdir()
+            alpha_bin = bin_dir / "alpha.bin"
+            beta_bin = bin_dir / "beta.gcpt"
+            alpha_bin.write_text("alpha", encoding="utf-8")
+            beta_bin.write_text("beta", encoding="utf-8")
+
+            bin_list = Path(tmp) / "bins.txt"
+            bin_list.write_text(
+                "\n".join(
+                    [
+                        "# batch inputs",
+                        "",
+                        str(alpha_bin),
+                        f"  {beta_bin}  ",
+                        "",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            entries = single_bin.load_bin_list_entries(str(bin_list))
+
+            self.assertEqual(
+                entries,
+                [
+                    {"bin": str(alpha_bin), "name": "alpha.bin"},
+                    {"bin": str(beta_bin), "name": "beta.gcpt"},
+                ],
+            )
+
+    def test_validate_input_args_rejects_archive_id_for_bin_list_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_list = Path(tmp) / "bins.txt"
+            bin_list.write_text("/tmp/demo.bin\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "archive-id"):
+                single_bin.validate_input_args(
+                    Namespace(
+                        bin=None,
+                        bin_list=str(bin_list),
+                        name=None,
+                        archive_id="shared-archive",
+                        interval=20000000,
+                        copies=1,
+                        resume_after=None,
+                    )
+                )
+
     def test_validate_outputs_accepts_zstd_checkpoint_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             archive_root = Path(tmp) / "archive"
@@ -123,6 +175,71 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 workloads=["demo"],
                 times=[1, 1, 1],
                 ids=[0, 0, 0],
+            )
+
+    def test_main_processes_each_entry_from_bin_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bins"
+            bin_dir.mkdir()
+            alpha_bin = bin_dir / "alpha.bin"
+            beta_bin = bin_dir / "beta.bin"
+            alpha_bin.write_text("alpha", encoding="utf-8")
+            beta_bin.write_text("beta", encoding="utf-8")
+
+            bin_list = Path(tmp) / "bins.txt"
+            bin_list.write_text(f"{alpha_bin}\n{beta_bin}\n", encoding="utf-8")
+
+            args = Namespace(
+                bin=None,
+                bin_list=str(bin_list),
+                name=None,
+                archive_id=None,
+                interval=20000000,
+                copies=2,
+                resume_after=None,
+            )
+
+            parser = mock.Mock()
+            parser.parse_args.return_value = args
+
+            with mock.patch.object(single_bin, "build_arg_parser", return_value=parser), \
+                 mock.patch.object(single_bin, "run_single_checkpoint", side_effect=[
+                     {
+                         "name": "alpha.bin",
+                         "archive_id": "archive-alpha",
+                         "checkpoint_count": 3,
+                         "checkpoint_dir": "/tmp/archive-alpha/checkpoint-0-0-0/alpha.bin",
+                     },
+                     {
+                         "name": "beta.bin",
+                         "archive_id": "archive-beta",
+                         "checkpoint_count": 5,
+                         "checkpoint_dir": "/tmp/archive-beta/checkpoint-0-0-0/beta.bin",
+                     },
+                 ]) as run_single:
+                exit_code = single_bin.main()
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(run_single.call_count, 2)
+            run_single.assert_has_calls(
+                [
+                    mock.call(
+                        bin_path=str(alpha_bin),
+                        workload_name="alpha.bin",
+                        archive_id=None,
+                        interval=20000000,
+                        copies=2,
+                        resume_after=None,
+                    ),
+                    mock.call(
+                        bin_path=str(beta_bin),
+                        workload_name="beta.bin",
+                        archive_id=None,
+                        interval=20000000,
+                        copies=2,
+                        resume_after=None,
+                    ),
+                ]
             )
 
 

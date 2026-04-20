@@ -9,17 +9,29 @@ WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "checkpoint-trigger.yml"
 
 
 class CheckpointWorkflowTests(unittest.TestCase):
-    def test_workflow_dispatch_exposes_interval_input_and_forwards_it(self):
+    def test_workflow_dispatch_exposes_single_and_batch_inputs(self):
         workflow = yaml.load(WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 
         dispatch = workflow["on"]["workflow_dispatch"]
         inputs = dispatch["inputs"]
         self.assertIn("interval", inputs)
+        self.assertIn("bin_list", inputs)
+        self.assertIn("rebuild_nemu", inputs)
+        self.assertIn("nemu_home", inputs)
+        self.assertIn("nemu_defconfig", inputs)
         self.assertEqual(inputs["interval"]["default"], "20000000")
 
         run_script = workflow["jobs"]["run-single-bin-checkpoint"]["steps"][-1]["run"]
         self.assertIn('INTERVAL="${{ github.event.inputs.interval }}"', run_script)
+        self.assertIn('BIN_LIST_PATH="${{ github.event.inputs.bin_list }}"', run_script)
+        self.assertIn('REBUILD_NEMU="${{ github.event.inputs.rebuild_nemu }}"', run_script)
+        self.assertIn('NEMU_OVERRIDE_HOME="${{ github.event.inputs.nemu_home }}"', run_script)
+        self.assertIn('NEMU_DEFCONFIG="${{ github.event.inputs.nemu_defconfig }}"', run_script)
+        self.assertIn('if [[ -n "$NEMU_OVERRIDE_HOME" ]]; then', run_script)
+        self.assertIn('if [[ "$REBUILD_NEMU" == "true" ]]; then', run_script)
+        self.assertIn('make "$NEMU_DEFCONFIG"', run_script)
         self.assertIn('--interval "$INTERVAL"', run_script)
+        self.assertIn('--bin-list "$BIN_LIST_PATH"', run_script)
         self.assertIn("- interval: \\`$INTERVAL\\`", run_script)
 
 

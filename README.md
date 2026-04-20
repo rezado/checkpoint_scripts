@@ -32,6 +32,13 @@ source /nfs/home/share/workload_env/env.sh
     - 使用 `riscv64-xs-cpt_defconfig` 配置 NEMU `make riscv64-xs-cpt_defconfig`
     - 构建 NEMU `make -j`
     - 构建 simpoint `cd /path/to/NEMU/resource/simpoint/simpoint_repo && make -j`
+    - 如果只想重编译 NEMU，可以直接在仓库根目录运行
+```bash
+INIT_NEMU=1 NEMU_HOME=/path/to/NEMU NEMU_DEFCONFIG=riscv64-xs-cpt_defconfig bash build.sh
+```
+        - `NEMU_HOME` 可选；不传时使用 `prepare_env.sh` 默认值
+        - `NEMU_DEFCONFIG` 可选；不传时默认 `riscv64-xs-cpt_defconfig`
+        - 这条路径只会重编译 NEMU、`gcpt_restore` 和 `simpoint`，不会重编译 Linux、QEMU、OpenSBI 或其他依赖
 
 - 构建 QEMU
     - 进入 QEMU 目录
@@ -154,9 +161,17 @@ bash checkpoint_scripts/run_single_bin_checkpoint.sh \
         - `--interval`：checkpoint 间隔，可选，默认 `20000000`
         - `--copies`：核数，可选，默认 `1`
         - `--resume-after profiling|cluster`：从已有 profiling 或 cluster 结果继续执行，可选
+        - `--bin-list`：批量模式使用的文本文件路径；文件中每行一个 bin 路径，支持空行和 `#` 注释；使用该模式时不再传 `--bin`、`--name`、`--archive-id`、`--resume-after`
+            - workload 名会自动取对应 bin 文件名
+            - 每个 bin 会生成各自独立的 archive
     - GitHub Action 手动触发
-        - 目前支持输入 `name`、`bin`、`interval`
+        - 目前支持输入 `name`、`bin`、`bin_list`、`interval`、`rebuild_nemu`、`nemu_home`、`nemu_defconfig`
+        - 单 bin 模式填写 `name` + `bin`
+        - 批量模式填写 `bin_list`
         - `interval` 需要填写正整数；默认值为 `20000000`
+        - `rebuild_nemu=true` 时，只会重编译 NEMU，不会重编译其他依赖
+        - `nemu_home` 可选；用于覆盖 `env.sh` 里的 `NEMU_HOME`
+        - `nemu_defconfig` 可选；默认 `riscv64-xs-cpt_defconfig`
 
     - 示例
 ```
@@ -164,6 +179,13 @@ bash checkpoint_scripts/run_single_bin_checkpoint.sh \
   --bin /nfs/home/wujiabin/work/checkpoint_scripts/checkpoint_scripts/archive/custom_gcc12.2.0_rv64gcb_base_custom_test_QEMU_testgroup_2026-03-31-17-19/gcpt_bins/my_bzip2 \
   --name my_bzip2 \
   --archive-id my-bzip2-run
+```
+
+    - 批量示例
+```
+bash checkpoint_scripts/run_single_bin_checkpoint.sh \
+  --bin-list /path/to/bin-list.txt \
+  --interval 20000000
 ```
 - 导出 checkpoint list 和权重文件
     - 修改 dump_result.py 文件中的 spec_list，base_path

@@ -23,18 +23,34 @@ Entrypoint:
 
 - Category: input path
 - Purpose: path to the input GCPT-bootable bin file
-- Required: yes
+- Required: yes in single-bin mode
 - Effective range:
   - Must be a readable file path
 - Validation:
   - File must exist
   - File must be readable
 
+### `--bin-list`
+
+- Category: batch input path
+- Purpose: path to a text file containing one GCPT-bootable bin path per line
+- Required: yes in batch mode
+- Effective range:
+  - Must be a readable file path
+  - Supports blank lines and lines beginning with `#`
+- Default behavior:
+  - The workload name for each entry is derived from the bin file name
+- Validation:
+  - File must exist
+  - File must be readable
+  - Must contain at least one usable bin path
+  - Derived workload names must be unique within the list
+
 ### `--name`
 
 - Category: workload identity
 - Purpose: logical workload name; also used in output directory names
-- Required: yes
+- Required: yes in single-bin mode
 - Effective range:
   - Any non-empty string
 - Validation:
@@ -49,6 +65,8 @@ Entrypoint:
   - Any string that is valid as a directory name in the local filesystem
 - Default behavior:
   - If omitted, the script generates `single_bin_nemu_<workload>_<timestamp>`
+- Notes:
+  - Only valid in single-bin mode
 
 ### `--interval`
 
@@ -85,6 +103,7 @@ Entrypoint:
 - Notes:
   - `profiling` requires an existing `profiling-0/<workload>/simpoint_bbv.gz`
   - `cluster` requires existing `cluster-0-0/<workload>/simpoints0` and `weights0`
+  - Only valid in single-bin mode
 
 ## 2. Full-Flow YAML Parameters
 
@@ -332,6 +351,21 @@ These are not command-line or YAML parameters, but they are required to run the 
 - Required contents:
   - `build/riscv64-nemu-interpreter`
   - `resource/simpoint/simpoint_repo/bin/simpoint`
+- Notes:
+  - In the GitHub Action, this can be overridden per run with the optional `nemu_home` input
+  - If the GitHub Action input `rebuild_nemu=true` is used, only NEMU, `gcpt_restore`, and `simpoint` are rebuilt
+
+#### `NEMU_DEFCONFIG`
+
+- Category: build-time environment / workflow input
+- Purpose: select the NEMU defconfig used when rebuilding NEMU
+- Effective range:
+  - Non-empty string accepted by `make <defconfig>`
+- Default:
+  - `riscv64-xs-cpt_defconfig`
+- Notes:
+  - Used by local `build.sh` when `INIT_NEMU=1`
+  - Used by the GitHub Action when `rebuild_nemu=true`
 
 ### Full-flow path
 
