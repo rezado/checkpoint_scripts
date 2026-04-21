@@ -1,3 +1,51 @@
+## GitHub Action 快速使用
+
+如果你只是想直接跑 checkpoint，而不是自己在本地拼装命令，优先使用 GitHub Action。
+
+- 进入仓库的 `Actions` 页面
+- 选择 `Checkpoint` workflow
+- 点击 `Run workflow`
+
+### 常用场景
+
+- 单 bin 模式
+    - 填写 `name` + `bin`
+- 批量模式
+    - 填写 `bin_list`
+
+### 关键输入
+
+- `interval`
+    - checkpoint 间隔，默认 `20000000`
+- `max_workers`
+    - 批量模式的最大并行 workload 数，默认 `3`
+- `nemu_home`
+    - 可选；填写后会覆盖默认 `NEMU_HOME`
+- `rebuild_nemu`
+    - 设为 `true` 时，只重编译 NEMU、`gcpt_restore` 和 `simpoint`
+- `nemu_defconfig`
+    - 可选；默认 `riscv64-xs-cpt_defconfig`
+
+### 单 bin 示例
+
+- `name`: `my_bzip2`
+- `bin`: `/abs/path/to/my_bzip2`
+- `interval`: `20000000`
+- `nemu_home`: `/nfs/home/wujiabin/work/xs-env/NEMU`
+
+### 批量示例
+
+- `bin_list`: `/nfs/home/wujiabin/work/checkpoint_scripts/workload_list.txt`
+- `interval`: `20000000`
+- `max_workers`: `3`
+- `nemu_home`: `/nfs/home/wujiabin/work/xs-env/NEMU`
+
+### 说明
+
+- `name` 只在单 bin 模式需要填写
+- `bin` 和 `bin_list` 二选一
+- 批量模式下，每个 workload 会生成各自独立的 archive
+
 ## 环境准备
 
 ### 可以访问公共服务器
@@ -166,14 +214,8 @@ bash checkpoint_scripts/run_single_bin_checkpoint.sh \
             - workload 名会自动取对应 bin 文件名
             - 每个 bin 会生成各自独立的 archive
     - GitHub Action 手动触发
-        - 目前支持输入 `name`、`bin`、`bin_list`、`interval`、`max_workers`、`rebuild_nemu`、`nemu_home`、`nemu_defconfig`
-        - 单 bin 模式填写 `name` + `bin`
-        - 批量模式填写 `bin_list`
-        - `interval` 需要填写正整数；默认值为 `20000000`
-        - `max_workers` 需要填写正整数；默认值为 `3`
-        - `rebuild_nemu=true` 时，只会重编译 NEMU，不会重编译其他依赖
-        - `nemu_home` 可选；用于覆盖 `env.sh` 里的 `NEMU_HOME`
-        - `nemu_defconfig` 可选；默认 `riscv64-xs-cpt_defconfig`
+        - 快速使用见 README 开头的 [GitHub Action 快速使用](#github-action-快速使用)
+        - 如果这里只看输入规则：`bin` 和 `bin_list` 二选一；批量模式可额外设置 `max_workers`；`nemu_home` 可覆盖默认 `NEMU_HOME`
 
     - 示例
 ```
