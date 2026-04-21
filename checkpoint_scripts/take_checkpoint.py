@@ -276,7 +276,7 @@ def nemu_checkpoint_command(config, is_resume_from):
     if is_resume_from:
         assert os.path.exists(simpoint_path)
     command = [
-        # "numactl","--cpunodebind={}".format(config["cpu_bind"]),"--membind={}".format(config["mem_bind"]),
+        "numactl","--cpunodebind={}".format(config["cpu_bind"]),"--membind={}".format(config["mem_bind"]),
         config["NEMU"]["NEMU"],
         "{}/{}{}".format(config["utils"]["workload_folder"], config["utils"]["workload"], config["utils"]["bin_suffix"]),
         "-D", config["utils"]["buffer"],
@@ -296,7 +296,7 @@ def qemu_checkpoint_command(config, is_resume_from):
     if is_resume_from:
         assert os.path.exists(simpoint_path)
     command = [
-        # "numactl","--cpunodebind={}".format(config["cpu_bind"]),"--membind={}".format(config["mem_bind"]),
+        "numactl","--cpunodebind={}".format(config["cpu_bind"]),"--membind={}".format(config["mem_bind"]),
         config["QEMU"]["QEMU"],
         "-bios", "{}/{}{}".format(config["utils"]["workload_folder"], config["utils"]["workload"], config["utils"]["bin_suffix"]),
         "-M", f'nemu,simpoint-path={simpoint_path},workload={config["utils"]["workload"]},cpt-interval={config["utils"]["interval"]},output-base-dir={config["utils"]["buffer"]},config-name={config["checkpoint"]["config"]},checkpoint-mode={"SimpointCheckpoint"}',

@@ -160,15 +160,17 @@ bash checkpoint_scripts/run_single_bin_checkpoint.sh \
         - `--archive-id`：输出 archive 名称，可选；不指定时会自动生成
         - `--interval`：checkpoint 间隔，可选，默认 `20000000`
         - `--copies`：核数，可选，默认 `1`
+        - `--max-workers`：批量模式的最大并行 workload 数，可选，默认 `3`
         - `--resume-after profiling|cluster`：从已有 profiling 或 cluster 结果继续执行，可选
         - `--bin-list`：批量模式使用的文本文件路径；文件中每行一个 bin 路径，支持空行和 `#` 注释；使用该模式时不再传 `--bin`、`--name`、`--archive-id`、`--resume-after`
             - workload 名会自动取对应 bin 文件名
             - 每个 bin 会生成各自独立的 archive
     - GitHub Action 手动触发
-        - 目前支持输入 `name`、`bin`、`bin_list`、`interval`、`rebuild_nemu`、`nemu_home`、`nemu_defconfig`
+        - 目前支持输入 `name`、`bin`、`bin_list`、`interval`、`max_workers`、`rebuild_nemu`、`nemu_home`、`nemu_defconfig`
         - 单 bin 模式填写 `name` + `bin`
         - 批量模式填写 `bin_list`
         - `interval` 需要填写正整数；默认值为 `20000000`
+        - `max_workers` 需要填写正整数；默认值为 `3`
         - `rebuild_nemu=true` 时，只会重编译 NEMU，不会重编译其他依赖
         - `nemu_home` 可选；用于覆盖 `env.sh` 里的 `NEMU_HOME`
         - `nemu_defconfig` 可选；默认 `riscv64-xs-cpt_defconfig`
@@ -185,7 +187,8 @@ bash checkpoint_scripts/run_single_bin_checkpoint.sh \
 ```
 bash checkpoint_scripts/run_single_bin_checkpoint.sh \
   --bin-list /path/to/bin-list.txt \
-  --interval 20000000
+  --interval 20000000 \
+  --max-workers 3
 ```
 - 导出 checkpoint list 和权重文件
     - 修改 dump_result.py 文件中的 spec_list，base_path

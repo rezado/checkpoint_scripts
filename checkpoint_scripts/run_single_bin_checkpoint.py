@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import os
 import shutil
 from datetime import datetime
@@ -113,6 +114,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         type=int,
                         default=1,
                         help="Core count passed to the checkpoint flow")
+    parser.add_argument("--max-workers",
+                        type=int,
+                        default=3,
+                        help="Maximum parallel workloads used by --bin-list mode")
     parser.add_argument("--resume-after",
                         choices=["profiling", "cluster"],
                         help="Resume from a later stage")
@@ -152,6 +157,8 @@ def validate_input_args(args) -> None:
 
     if args.copies < 1:
         raise ValueError("--copies must be at least 1")
+    if args.max_workers < 1:
+        raise ValueError("--max-workers must be at least 1")
     if args.interval <= 0:
         raise ValueError("--interval must be a positive integer")
 
@@ -194,7 +201,7 @@ def count_checkpoints(archive_root: str, workload: str) -> int:
 
 
 def build_single_run_args(bin_path: str, workload_name: str, archive_id: str | None,
-                          interval: int, copies: int,
+                          interval: int, copies: int, max_workers: int,
                           resume_after: str | None) -> argparse.Namespace:
     return argparse.Namespace(
         bin=bin_path,
@@ -203,8 +210,14 @@ def build_single_run_args(bin_path: str, workload_name: str, archive_id: str | N
         archive_id=archive_id,
         interval=interval,
         copies=copies,
+        max_workers=max_workers,
         resume_after=resume_after,
     )
+
+
+def get_worker_bindings(index: int, numa_nodes: int = 2) -> tuple[str, str]:
+    node = str(index % max(1, numa_nodes))
+    return node, node
 
 
 def load_bin_list_entries(bin_list_path: str) -> list[dict[str, str]]:
@@ -239,13 +252,15 @@ def load_bin_list_entries(bin_list_path: str) -> list[dict[str, str]]:
 
 def run_single_checkpoint(*, bin_path: str, workload_name: str,
                           archive_id: str | None, interval: int, copies: int,
-                          resume_after: str | None) -> dict[str, str | int]:
+                          resume_after: str | None, cpu_bind: str = "0",
+                          mem_bind: str = "0") -> dict[str, str | int]:
     args = build_single_run_args(
         bin_path=bin_path,
         workload_name=workload_name,
         archive_id=archive_id,
         interval=interval,
         copies=copies,
+        max_workers=1,
         resume_after=resume_after,
     )
     validate_input_args(args)
@@ -288,8 +303,8 @@ def run_single_checkpoint(*, bin_path: str, workload_name: str,
                             bin_suffix="",
                             emu="NEMU",
                             log_folder=layout["logs"],
-                            cpu_bind="0",
-                            mem_bind="0",
+                            cpu_bind=cpu_bind,
+                            mem_bind=mem_bind,
                             copies=str(copies),
                             config=config,
                             resume_after=resume_after,
@@ -302,6 +317,8 @@ def run_single_checkpoint(*, bin_path: str, workload_name: str,
     print(f"Metadata: {metadata_path}")
     print(f"Interval: {interval}")
     print(f"Copies: {copies}")
+    print(f"CPU bind: {cpu_bind}")
+    print(f"MEM bind: {mem_bind}")
     print(f"Resume after: {resume_after or 'fresh'}")
 
     level_first_exec(root)
@@ -349,21 +366,44 @@ def main() -> int:
                                   archive_id=None,
                                   interval=args.interval,
                                   copies=args.copies,
+                                  max_workers=args.max_workers,
                                   resume_after=None))
 
     print(f"Batch size: {len(entries)}")
+    print(f"Max workers: {args.max_workers}")
     results = []
-    for index, entry in enumerate(entries, start=1):
-        print(
-            f"=== [{index}/{len(entries)}] Checkpointing {entry['name']} from {entry['bin']} ==="
-        )
-        result = run_single_checkpoint(bin_path=entry["bin"],
-                                       workload_name=entry["name"],
-                                       archive_id=None,
-                                       interval=args.interval,
-                                       copies=args.copies,
-                                       resume_after=None)
-        results.append(result)
+    failures = []
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=args.max_workers) as executor:
+        future_to_entry = {}
+        for index, entry in enumerate(entries):
+            cpu_bind, mem_bind = get_worker_bindings(index)
+            print(
+                f"=== [{index + 1}/{len(entries)}] Checkpointing {entry['name']} from {entry['bin']} (cpu={cpu_bind}, mem={mem_bind}) ==="
+            )
+            future = executor.submit(run_single_checkpoint,
+                                     bin_path=entry["bin"],
+                                     workload_name=entry["name"],
+                                     archive_id=None,
+                                     interval=args.interval,
+                                     copies=args.copies,
+                                     resume_after=None,
+                                     cpu_bind=cpu_bind,
+                                     mem_bind=mem_bind)
+            future_to_entry[future] = entry
+
+        for future in concurrent.futures.as_completed(future_to_entry):
+            entry = future_to_entry[future]
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                failures.append({"name": entry["name"], "error": str(exc)})
+
+    if failures:
+        print("Batch failures:")
+        for failure in failures:
+            print(f"- {failure['name']}: {failure['error']}")
+        return 1
 
     print("Batch summary:")
     for result in results:

@@ -22,6 +22,11 @@ on:
         required: false
         default: "20000000"
         type: string
+      max_workers:
+        description: Maximum parallel workloads used in batch mode
+        required: false
+        default: "3"
+        type: string
       rebuild_nemu:
         description: Rebuild only NEMU before running the checkpoint flow
         required: false
@@ -62,6 +67,7 @@ jobs:
           BIN_LIST_PATH="${{ github.event.inputs.bin_list }}"
           WORKLOAD_NAME="${{ github.event.inputs.name }}"
           INTERVAL="${{ github.event.inputs.interval }}"
+          MAX_WORKERS="${{ github.event.inputs.max_workers }}"
           REBUILD_NEMU="${{ github.event.inputs.rebuild_nemu }}"
           NEMU_OVERRIDE_HOME="${{ github.event.inputs.nemu_home }}"
           NEMU_DEFCONFIG="${{ github.event.inputs.nemu_defconfig }}"
@@ -86,6 +92,11 @@ jobs:
 
           if [[ ! "$INTERVAL" =~ ^[0-9]+$ ]] || [[ "$INTERVAL" -le 0 ]]; then
             echo "ERROR: interval must be a positive integer, got: $INTERVAL"
+            exit 1
+          fi
+
+          if [[ ! "$MAX_WORKERS" =~ ^[0-9]+$ ]] || [[ "$MAX_WORKERS" -le 0 ]]; then
+            echo "ERROR: max_workers must be a positive integer, got: $MAX_WORKERS"
             exit 1
           fi
 
@@ -147,6 +158,7 @@ jobs:
               echo "- name: \`$WORKLOAD_NAME\`"
               echo "- bin: \`$BIN_PATH\`"
               echo "- interval: \`$INTERVAL\`"
+              echo "- max_workers: \`$MAX_WORKERS\`"
               echo "- archive_id: \`$ARCHIVE_ID\`"
               echo "- archive_dir: \`$GITHUB_WORKSPACE/checkpoint_scripts/archive/$ARCHIVE_ID\`"
               echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
@@ -164,10 +176,12 @@ jobs:
             echo "INFO: bin_list=$BIN_LIST_PATH"
             echo "INFO: entries=$ENTRY_COUNT"
             echo "INFO: interval=$INTERVAL"
+            echo "INFO: max_workers=$MAX_WORKERS"
 
             bash run_single_bin_checkpoint.sh \
               --bin-list "$BIN_LIST_PATH" \
-              --interval "$INTERVAL"
+              --interval "$INTERVAL" \
+              --max-workers "$MAX_WORKERS"
 
             {
               echo "## Batch Checkpoint Result"
@@ -175,6 +189,7 @@ jobs:
               echo "- bin_list: \`$BIN_LIST_PATH\`"
               echo "- entries: \`$ENTRY_COUNT\`"
               echo "- interval: \`$INTERVAL\`"
+              echo "- max_workers: \`$MAX_WORKERS\`"
               echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
               echo "- nemu_home: \`${NEMU_OVERRIDE_HOME:-$NEMU_HOME}\`"
               echo "- nemu_defconfig: \`$NEMU_DEFCONFIG\`"

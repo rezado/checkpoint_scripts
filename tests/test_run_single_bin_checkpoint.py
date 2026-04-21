@@ -56,6 +56,13 @@ class SingleBinCheckpointTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args([])
 
+    def test_parse_args_accepts_max_workers(self):
+        parser = single_bin.build_arg_parser()
+        args = parser.parse_args(
+            ["--bin-list", "/tmp/bins.txt", "--max-workers", "3"]
+        )
+        self.assertEqual(args.max_workers, 3)
+
     def test_load_bin_list_entries_ignores_comments_and_uses_file_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bins"
@@ -105,6 +112,26 @@ class SingleBinCheckpointTests(unittest.TestCase):
                         interval=20000000,
                         copies=1,
                         resume_after=None,
+                        max_workers=3,
+                    )
+                )
+
+    def test_validate_input_args_rejects_non_positive_max_workers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_list = Path(tmp) / "bins.txt"
+            bin_list.write_text("/tmp/demo.bin\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "max-workers"):
+                single_bin.validate_input_args(
+                    Namespace(
+                        bin=None,
+                        bin_list=str(bin_list),
+                        name=None,
+                        archive_id=None,
+                        interval=20000000,
+                        copies=1,
+                        resume_after=None,
+                        max_workers=0,
                     )
                 )
 
@@ -143,6 +170,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 interval=20000000,
                 copies=1,
                 resume_after=None,
+                max_workers=3,
             )
 
             parser = mock.Mock()
@@ -177,7 +205,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 ids=[0, 0, 0],
             )
 
-    def test_main_processes_each_entry_from_bin_list(self):
+    def test_main_processes_each_entry_from_bin_list_in_parallel(self):
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bins"
             bin_dir.mkdir()
@@ -197,47 +225,60 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 interval=20000000,
                 copies=2,
                 resume_after=None,
+                max_workers=3,
             )
 
             parser = mock.Mock()
             parser.parse_args.return_value = args
 
+            future_alpha = mock.Mock()
+            future_alpha.result.return_value = {
+                "name": "alpha.bin",
+                "archive_id": "archive-alpha",
+                "checkpoint_count": 3,
+                "checkpoint_dir": "/tmp/archive-alpha/checkpoint-0-0-0/alpha.bin",
+            }
+            future_beta = mock.Mock()
+            future_beta.result.return_value = {
+                "name": "beta.bin",
+                "archive_id": "archive-beta",
+                "checkpoint_count": 5,
+                "checkpoint_dir": "/tmp/archive-beta/checkpoint-0-0-0/beta.bin",
+            }
+
             with mock.patch.object(single_bin, "build_arg_parser", return_value=parser), \
-                 mock.patch.object(single_bin, "run_single_checkpoint", side_effect=[
-                     {
-                         "name": "alpha.bin",
-                         "archive_id": "archive-alpha",
-                         "checkpoint_count": 3,
-                         "checkpoint_dir": "/tmp/archive-alpha/checkpoint-0-0-0/alpha.bin",
-                     },
-                     {
-                         "name": "beta.bin",
-                         "archive_id": "archive-beta",
-                         "checkpoint_count": 5,
-                         "checkpoint_dir": "/tmp/archive-beta/checkpoint-0-0-0/beta.bin",
-                     },
-                 ]) as run_single:
+                 mock.patch.object(single_bin, "run_single_checkpoint") as run_single, \
+                 mock.patch.object(single_bin.concurrent.futures, "ThreadPoolExecutor") as pool_cls, \
+                 mock.patch.object(single_bin.concurrent.futures, "as_completed", return_value=[future_alpha, future_beta]):
+                pool = pool_cls.return_value.__enter__.return_value
+                pool.submit.side_effect = [future_alpha, future_beta]
                 exit_code = single_bin.main()
 
             self.assertEqual(exit_code, 0)
-            self.assertEqual(run_single.call_count, 2)
-            run_single.assert_has_calls(
+            self.assertEqual(pool.submit.call_count, 2)
+            pool.submit.assert_has_calls(
                 [
                     mock.call(
+                        run_single,
                         bin_path=str(alpha_bin),
                         workload_name="alpha.bin",
                         archive_id=None,
                         interval=20000000,
                         copies=2,
                         resume_after=None,
+                        cpu_bind="0",
+                        mem_bind="0",
                     ),
                     mock.call(
+                        run_single,
                         bin_path=str(beta_bin),
                         workload_name="beta.bin",
                         archive_id=None,
                         interval=20000000,
                         copies=2,
                         resume_after=None,
+                        cpu_bind="1",
+                        mem_bind="1",
                     ),
                 ]
             )
