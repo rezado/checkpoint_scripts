@@ -6,6 +6,7 @@ import copy
 import random
 import concurrent.futures
 import subprocess
+import threading
 from collections import deque
 from config import BaseConfig
 
@@ -207,7 +208,16 @@ def level_first_exec(root):
                 list(map(lambda x: e.submit(x.execute), execute_list))
 
 
-profiling_roots = CheckpointTree(None)
+_thread_state = threading.local()
+
+
+def _get_profiling_root():
+    return getattr(_thread_state, "profiling_root", None)
+
+
+def _set_profiling_root(root):
+    _thread_state.profiling_root = root
+    return root
 
 def nemu_profiling_command(config):
     command = [
@@ -328,8 +338,7 @@ def profiling_func(profiling_id, config, dry_run=False):
         profiling_config["backup_commands"] = [['cp', profiling_config["out-log"], bak_out_log_path], ['cp', profiling_config["err-log"], bak_err_log_path]]
         profiling_config["command"] = ["echo", '"dry_run_profiling_command"']
 
-    global profiling_roots
-    profiling_roots = CheckpointTree(profiling_config)
+    _set_profiling_root(CheckpointTree(profiling_config))
 
     return profiling_config["profiling"]["config"]
 
@@ -354,8 +363,7 @@ def cluster_func(profiling_id, cluster_id, config, is_resume_from=False, dry_run
         cluster_config["command"] = ['echo', 'dry_run_cluster_command']
 
     child = CheckpointTree(cluster_config)
-    global profiling_roots
-    profiling_roots.add_child(child)
+    _get_profiling_root().add_child(child)
 
     return cluster_config["cluster"]["config"]
 
@@ -386,8 +394,7 @@ def checkpoint_func(profiling_id, cluster_id, checkpoint_id, config, is_resume_f
             checkpoint_config, is_resume_from=is_resume_from)
 
     child = CheckpointTree(checkpoint_config)
-    global profiling_roots
-    profiling_roots.children[cluster_id].add_child(child)
+    _get_profiling_root().children[cluster_id].add_child(child)
 
     return checkpoint_config["checkpoint"]["config"]
 
@@ -421,14 +428,12 @@ def generate_command(workload_folder,
     config["mem_bind"] = mem_bind
     config["all_in_one_workload"] = all_in_one_workload
 
-    global profiling_roots
     if not os.path.exists(
             os.path.join(
                 config["utils"]["workload_folder"],
                 f"{config['utils']['workload']}{config['utils']['bin_suffix']}"
             )):
-        profiling_roots = None
-        return profiling_roots
+        return _set_profiling_root(None)
 
 
     if resume_after is None or len(resume_after) == 0:
@@ -448,7 +453,7 @@ def generate_command(workload_folder,
     print(list(itertools.starmap(cl_func, config["cluster_configs"])))
     print(list(itertools.starmap(c_func, config["checkpoint_configs"])))
 
-    return profiling_roots
+    return _get_profiling_root()
 
 #generate_command("gcc_test", "astar_biglakes", "archive", "", "NEMU", "log_folder")
 #print_tree(profiling_roots[0])
