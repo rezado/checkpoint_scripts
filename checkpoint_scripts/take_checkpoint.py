@@ -213,6 +213,13 @@ def level_first_exec(root):
                 returncode = future.result()
                 if returncode != 0:
                     command = node.value.get("command") if node.value else None
+                    # NEMU workloads may end with app-specific non-zero trap codes.
+                    # Treat those as non-fatal so downstream stages can continue.
+                    is_nemu_command = bool(command) and any(
+                        "riscv64-nemu-interpreter" in str(part)
+                        for part in command)
+                    if is_nemu_command:
+                        continue
                     raise subprocess.CalledProcessError(
                         returncode if returncode is not None else 1, command)
 

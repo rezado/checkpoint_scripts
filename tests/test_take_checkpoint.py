@@ -215,5 +215,54 @@ class LevelFirstExecTests(unittest.TestCase):
         self.assertEqual(worker_counts, [1, 1])
 
 
+    def test_level_first_exec_allows_nemu_non_zero_and_continues(self):
+        events = []
+
+        class FakeNode:
+            def __init__(self, name, returncode, command, children=None):
+                self.children = list(children or [])
+                self.value = {
+                    "execute_mode": name,
+                    "utils": {"workload": name},
+                    "command": command,
+                }
+                self._returncode = returncode
+
+            def execute(self):
+                events.append(self.value["execute_mode"])
+                return self._returncode
+
+        class InlineExecutor:
+            def __init__(self, max_workers=None):
+                self.max_workers = max_workers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def submit(self, fn):
+                future = concurrent.futures.Future()
+                try:
+                    future.set_result(fn())
+                except Exception as exc:  # pragma: no cover - test helper
+                    future.set_exception(exc)
+                return future
+
+        root = FakeNode(
+            "profiling",
+            258,
+            ["numactl", "riscv64-nemu-interpreter", "-b"],
+            children=[FakeNode("cluster", 0, ["simpoint"])],
+        )
+
+        with mock.patch.object(
+            take_checkpoint.concurrent.futures, "ProcessPoolExecutor", InlineExecutor
+        ):
+            take_checkpoint.level_first_exec(root)
+
+        self.assertEqual(events, ["profiling", "cluster"])
+
 if __name__ == "__main__":
     unittest.main()
