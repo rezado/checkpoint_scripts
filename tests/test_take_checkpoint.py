@@ -1,4 +1,5 @@
 import concurrent.futures
+import subprocess
 import sys
 import tempfile
 import threading
@@ -126,6 +127,92 @@ class GenerateCommandThreadSafetyTests(unittest.TestCase):
             self.assertEqual(len(cluster.children), 1)
             checkpoint = cluster.children[0]
             self.assertEqual(checkpoint.value["utils"]["workload"], workload)
+
+
+class LevelFirstExecTests(unittest.TestCase):
+    def test_level_first_exec_stops_after_failed_level(self):
+        events = []
+
+        class FakeNode:
+            def __init__(self, name, returncode, children=None):
+                self.children = list(children or [])
+                self.value = {
+                    "execute_mode": name,
+                    "utils": {"workload": name},
+                    "command": [name],
+                }
+                self._returncode = returncode
+
+            def execute(self):
+                events.append(self.value["execute_mode"])
+                return self._returncode
+
+        class InlineExecutor:
+            def __init__(self, max_workers=None):
+                self.max_workers = max_workers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def submit(self, fn):
+                future = concurrent.futures.Future()
+                try:
+                    future.set_result(fn())
+                except Exception as exc:  # pragma: no cover - test helper
+                    future.set_exception(exc)
+                return future
+
+        root = FakeNode("profiling", 1, children=[FakeNode("cluster", 0)])
+
+        with mock.patch.object(
+            take_checkpoint.concurrent.futures, "ProcessPoolExecutor", InlineExecutor
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                take_checkpoint.level_first_exec(root)
+
+        self.assertEqual(events, ["profiling"])
+
+    def test_level_first_exec_uses_level_size_for_worker_count(self):
+        worker_counts = []
+
+        class FakeNode:
+            def __init__(self, name, children=None):
+                self.children = list(children or [])
+                self.value = {
+                    "execute_mode": name,
+                    "utils": {"workload": name},
+                    "command": [name],
+                }
+
+            def execute(self):
+                return 0
+
+        class RecordingExecutor:
+            def __init__(self, max_workers=None):
+                worker_counts.append(max_workers)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def submit(self, fn):
+                future = concurrent.futures.Future()
+                future.set_result(fn())
+                return future
+
+        root = FakeNode("profiling", children=[FakeNode("cluster")])
+
+        with mock.patch.object(
+            take_checkpoint.concurrent.futures, "ProcessPoolExecutor", RecordingExecutor
+        ):
+            take_checkpoint.level_first_exec(root)
+
+        self.assertEqual(worker_counts, [1, 1])
 
 
 if __name__ == "__main__":

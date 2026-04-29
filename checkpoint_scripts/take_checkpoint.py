@@ -204,8 +204,17 @@ def level_first_exec(root):
             execute_list.append(node)
             for child in node.children:
                 queue.append(child)
-        with concurrent.futures.ProcessPoolExecutor() as e:
-                list(map(lambda x: e.submit(x.execute), execute_list))
+        with concurrent.futures.ProcessPoolExecutor(
+                max_workers=max(1, len(execute_list))) as e:
+            future_to_node = {
+                e.submit(node.execute): node for node in execute_list
+            }
+            for future, node in future_to_node.items():
+                returncode = future.result()
+                if returncode != 0:
+                    command = node.value.get("command") if node.value else None
+                    raise subprocess.CalledProcessError(
+                        returncode if returncode is not None else 1, command)
 
 
 _thread_state = threading.local()
