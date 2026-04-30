@@ -150,11 +150,124 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 "0 0", encoding="utf-8"
             )
             (archive_root / "cluster-0-0" / "demo" / "weights0").write_text(
-                "1 1.0", encoding="utf-8"
+                "1.0 0", encoding="utf-8"
             )
             (checkpoint_dir / "_0_1.0_.zstd").write_text("checkpoint", encoding="utf-8")
 
             single_bin.validate_outputs(str(archive_root), "demo")
+
+    def test_validate_outputs_rejects_missing_expected_checkpoint_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_root = Path(tmp) / "archive"
+            (archive_root / "profiling-0" / "demo").mkdir(parents=True)
+            (archive_root / "cluster-0-0" / "demo").mkdir(parents=True)
+            present_dir = archive_root / "checkpoint-0-0-0" / "demo" / "55"
+            missing_dir = archive_root / "checkpoint-0-0-0" / "demo" / "2444"
+            present_dir.mkdir(parents=True)
+            missing_dir.mkdir(parents=True)
+
+            (archive_root / "profiling-0" / "demo" / "simpoint_bbv.gz").write_text(
+                "bbv", encoding="utf-8"
+            )
+            (archive_root / "cluster-0-0" / "demo" / "simpoints0").write_text(
+                "55 0\n2444 1\n", encoding="utf-8"
+            )
+            (archive_root / "cluster-0-0" / "demo" / "weights0").write_text(
+                "0.081159 0\n0.009262 1\n", encoding="utf-8"
+            )
+            (present_dir / "_55_0.081159_memory_.zstd").write_text(
+                "checkpoint", encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(FileNotFoundError, "2444"):
+                single_bin.validate_outputs(str(archive_root), "demo")
+
+    def test_reset_stage_outputs_clears_stale_outputs_for_fresh_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_root = Path(tmp) / "archive"
+            profiling_dir = archive_root / "profiling-0" / "demo"
+            cluster_dir = archive_root / "cluster-0-0" / "demo"
+            checkpoint_dir = archive_root / "checkpoint-0-0-0" / "demo" / "55"
+            profiling_log_dir = archive_root / "logs" / "profiling-0" / "demo"
+            cluster_log_dir = archive_root / "logs" / "cluster-0-0" / "demo"
+            checkpoint_log_dir = archive_root / "logs" / "checkpoint-0-0-0" / "demo"
+            metadata_dir = archive_root / "metadata"
+
+            for path in [
+                profiling_dir,
+                cluster_dir,
+                checkpoint_dir,
+                profiling_log_dir,
+                cluster_log_dir,
+                checkpoint_log_dir,
+                metadata_dir,
+            ]:
+                path.mkdir(parents=True, exist_ok=True)
+
+            (profiling_dir / "simpoint_bbv.gz").write_text("bbv", encoding="utf-8")
+            (cluster_dir / "simpoints0").write_text("55 0", encoding="utf-8")
+            (checkpoint_dir / "_55_0.5_memory_.zstd").write_text(
+                "checkpoint", encoding="utf-8"
+            )
+            (archive_root / "checkpoint-0-0-0" / "cluster-0-0.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            (archive_root / "checkpoint-0-0-0" / "checkpoint.lst").write_text(
+                "demo_55 demo/55 0 0 20 20\n", encoding="utf-8"
+            )
+
+            single_bin.reset_stage_outputs(str(archive_root), "demo", None)
+
+            self.assertFalse(profiling_dir.exists())
+            self.assertFalse(cluster_dir.exists())
+            self.assertFalse(checkpoint_dir.parent.exists())
+            self.assertFalse(profiling_log_dir.exists())
+            self.assertFalse(cluster_log_dir.exists())
+            self.assertFalse(checkpoint_log_dir.exists())
+            self.assertFalse((archive_root / "checkpoint-0-0-0" / "cluster-0-0.json").exists())
+            self.assertFalse((archive_root / "checkpoint-0-0-0" / "checkpoint.lst").exists())
+            self.assertTrue(metadata_dir.exists())
+
+    def test_reset_stage_outputs_preserves_resume_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_root = Path(tmp) / "archive"
+            profiling_dir = archive_root / "profiling-0" / "demo"
+            cluster_dir = archive_root / "cluster-0-0" / "demo"
+            checkpoint_dir = archive_root / "checkpoint-0-0-0" / "demo" / "55"
+            profiling_log_dir = archive_root / "logs" / "profiling-0" / "demo"
+            cluster_log_dir = archive_root / "logs" / "cluster-0-0" / "demo"
+            checkpoint_log_dir = archive_root / "logs" / "checkpoint-0-0-0" / "demo"
+
+            for path in [
+                profiling_dir,
+                cluster_dir,
+                checkpoint_dir,
+                profiling_log_dir,
+                cluster_log_dir,
+                checkpoint_log_dir,
+            ]:
+                path.mkdir(parents=True, exist_ok=True)
+
+            single_bin.reset_stage_outputs(str(archive_root), "demo", "profiling")
+            self.assertTrue(profiling_dir.exists())
+            self.assertTrue(profiling_log_dir.exists())
+            self.assertFalse(cluster_dir.exists())
+            self.assertFalse(cluster_log_dir.exists())
+            self.assertFalse(checkpoint_dir.parent.exists())
+            self.assertFalse(checkpoint_log_dir.exists())
+
+            cluster_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            cluster_log_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_log_dir.mkdir(parents=True, exist_ok=True)
+
+            single_bin.reset_stage_outputs(str(archive_root), "demo", "cluster")
+            self.assertTrue(profiling_dir.exists())
+            self.assertTrue(cluster_dir.exists())
+            self.assertTrue(profiling_log_dir.exists())
+            self.assertTrue(cluster_log_dir.exists())
+            self.assertFalse(checkpoint_dir.parent.exists())
+            self.assertFalse(checkpoint_log_dir.exists())
 
     def test_main_invokes_checkpoint_postprocess_after_validation(self):
         with tempfile.TemporaryDirectory() as tmp:

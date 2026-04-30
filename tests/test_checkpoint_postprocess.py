@@ -68,6 +68,20 @@ class CheckpointPostprocessTests(unittest.TestCase):
         self.assertEqual(result[1]["profiling_log"], "/tmp/archive/logs/profiling-0")
         self.assertEqual(result[1]["json_path"], "/tmp/archive/checkpoint-0-0-1/cluster-0-0.json")
 
+    def test_profiling_instrs_rejects_empty_profiling_log(self):
+        try:
+            postprocess = importlib.import_module("checkpoint_postprocess")
+        except ModuleNotFoundError as exc:
+            self.fail(f"checkpoint_postprocess module missing: {exc}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "demo").mkdir(parents=True)
+            (base / "demo" / "profiling.out.log").write_text("", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "failed to find instructions"):
+                postprocess.profiling_instrs(str(base), "demo", using_new_script=True)
+
 
 if __name__ == "__main__":
     unittest.main()

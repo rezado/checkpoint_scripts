@@ -64,12 +64,16 @@ def generate_specapp_assembly(spec_base_app_list, elf_src_path, elf_dst_path,
         ]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as e:
-        list(
-            map(
-                lambda item: e.submit(
-                    dump_assembly, item[1],
-                    os.path.join(assembly_path, item[0] + ".txt")),
-                cp_dst_file_path_list))
+        submit_result = [
+            e.submit(
+                dump_assembly,
+                item[1],
+                os.path.join(assembly_path, item[0] + ".txt"),
+            )
+            for item in cp_dst_file_path_list
+        ]
+        for future in submit_result:
+            future.result()
 
 class GlobalConfigCtx(BaseConfig):
 
@@ -279,7 +283,7 @@ def main(config_ctx: GlobalConfigCtx):
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=base_config["max_threads"]) as e:
 #                futures = [e.submit(level_first_exec, task) for task in spec_app_execute_list]
-                e.map(level_first_exec, spec_app_execute_list)
+                list(e.map(level_first_exec, spec_app_execute_list))
             generate_checkpoint_metadata(
                 archive_root=archive_buffer_layout["buffer_path"],
                 workloads=spec_app_list,
@@ -313,7 +317,7 @@ def main(config_ctx: GlobalConfigCtx):
         if spec_app_execute_list:
             with concurrent.futures.ProcessPoolExecutor(
                     max_workers=base_config["max_threads"]) as e:
-                    e.map(level_first_exec, spec_app_execute_list)
+                    list(e.map(level_first_exec, spec_app_execute_list))
             generate_checkpoint_metadata(
                 archive_root=archive_buffer_layout["buffer_path"],
                 workloads=spec_app_list,

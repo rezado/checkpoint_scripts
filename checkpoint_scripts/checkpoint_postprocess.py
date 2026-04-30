@@ -31,7 +31,7 @@ def profiling_instrs(profiling_log, spec_app, using_new_script=False):
             if not match:
                 raise ValueError(f"failed to parse instructions from {path}")
             return match[0].replace(",", "")
-    return 0
+    raise ValueError(f"failed to find instructions in {path}")
 
 
 def cluster_weight(cluster_path, spec_app):

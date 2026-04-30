@@ -4,6 +4,7 @@ import os
 import shutil
 from datetime import datetime
 
+from checkpoint_postprocess import cluster_weight
 from checkpoint_postprocess import generate_checkpoint_metadata
 from take_checkpoint import TakeCheckpointConfig
 from take_checkpoint import generate_command
@@ -88,6 +89,26 @@ def validate_outputs(archive_root: str, workload: str) -> None:
     if checkpoint_count == 0:
         raise FileNotFoundError(
             f"no compressed checkpoint artifacts found under: {checkpoint_dir}")
+
+    expected_points = cluster_weight(
+        os.path.join(archive_root, "cluster-0-0"), workload)
+    missing_points = []
+    for point in sorted(expected_points):
+        point_dir = os.path.join(checkpoint_dir, point)
+        if not os.path.isdir(point_dir):
+            missing_points.append(point)
+            continue
+
+        has_artifact = any(
+            name.endswith(COMPRESSED_CHECKPOINT_SUFFIXES)
+            for name in os.listdir(point_dir))
+        if not has_artifact:
+            missing_points.append(point)
+
+    if missing_points:
+        raise FileNotFoundError(
+            "missing compressed checkpoint artifacts for expected simpoints: "
+            + ", ".join(missing_points))
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -193,6 +214,46 @@ def ensure_resume_logs(archive_root: str, workload: str,
                 handle.write("")
 
 
+def remove_path(path: str) -> None:
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    elif os.path.exists(path):
+        os.remove(path)
+
+
+def reset_stage_outputs(archive_root: str, workload: str,
+                        resume_after: str | None) -> None:
+    if resume_after is None:
+        stages_to_remove = ("profiling", "cluster", "checkpoint")
+    elif resume_after == "profiling":
+        stages_to_remove = ("cluster", "checkpoint")
+    elif resume_after == "cluster":
+        stages_to_remove = ("checkpoint",)
+    else:
+        raise ValueError(f"unsupported resume stage: {resume_after}")
+
+    stage_paths = {
+        "profiling": [
+            os.path.join(archive_root, "profiling-0", workload),
+            os.path.join(archive_root, "logs", "profiling-0", workload),
+        ],
+        "cluster": [
+            os.path.join(archive_root, "cluster-0-0", workload),
+            os.path.join(archive_root, "logs", "cluster-0-0", workload),
+        ],
+        "checkpoint": [
+            os.path.join(archive_root, "checkpoint-0-0-0", workload),
+            os.path.join(archive_root, "logs", "checkpoint-0-0-0", workload),
+            os.path.join(archive_root, "checkpoint-0-0-0", "cluster-0-0.json"),
+            os.path.join(archive_root, "checkpoint-0-0-0", "checkpoint.lst"),
+        ],
+    }
+
+    for stage in stages_to_remove:
+        for path in stage_paths[stage]:
+            remove_path(path)
+
+
 def count_checkpoints(archive_root: str, workload: str) -> int:
     checkpoint_dir = os.path.join(archive_root, "checkpoint-0-0-0", workload)
     return sum(
@@ -283,6 +344,7 @@ def run_single_checkpoint(*, bin_path: str, workload_name: str,
                                 os.path.join(layout["gcpt_bins"],
                                              workload_name))
 
+    reset_stage_outputs(archive_root, workload_name, resume_after)
     validate_resume_artifacts(archive_root, workload_name, resume_after)
     ensure_resume_logs(archive_root, workload_name, resume_after)
 
