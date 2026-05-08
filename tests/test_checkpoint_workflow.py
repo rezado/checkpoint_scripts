@@ -14,6 +14,7 @@ class CheckpointWorkflowTests(unittest.TestCase):
 
         dispatch = workflow["on"]["workflow_dispatch"]
         inputs = dispatch["inputs"]
+        job = workflow["jobs"]["run-single-bin-checkpoint"]
         self.assertIn("interval", inputs)
         self.assertIn("bin_list", inputs)
         self.assertIn("rebuild_nemu", inputs)
@@ -22,8 +23,9 @@ class CheckpointWorkflowTests(unittest.TestCase):
         self.assertIn("max_workers", inputs)
         self.assertEqual(inputs["interval"]["default"], "20000000")
         self.assertEqual(inputs["max_workers"]["default"], "3")
+        self.assertEqual(job["timeout-minutes"], "2880")
 
-        run_script = workflow["jobs"]["run-single-bin-checkpoint"]["steps"][-1]["run"]
+        run_script = job["steps"][-1]["run"]
         self.assertIn('INTERVAL="${{ github.event.inputs.interval }}"', run_script)
         self.assertIn('MAX_WORKERS="${{ github.event.inputs.max_workers }}"', run_script)
         self.assertIn('BIN_LIST_PATH="${{ github.event.inputs.bin_list }}"', run_script)
