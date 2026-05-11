@@ -63,6 +63,20 @@ class SingleBinCheckpointTests(unittest.TestCase):
         )
         self.assertEqual(args.max_workers, 3)
 
+    def test_parse_args_accepts_auto_resume_for_bin_list(self):
+        parser = single_bin.build_arg_parser()
+        args = parser.parse_args(
+            [
+                "--bin-list",
+                "/tmp/bins.txt",
+                "--resume-after",
+                "auto",
+                "--allow-new-archives",
+            ]
+        )
+        self.assertEqual(args.resume_after, "auto")
+        self.assertTrue(args.allow_new_archives)
+
     def test_load_bin_list_entries_ignores_comments_and_uses_file_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bins"
@@ -113,6 +127,45 @@ class SingleBinCheckpointTests(unittest.TestCase):
                         copies=1,
                         resume_after=None,
                         max_workers=3,
+                    )
+                )
+
+    def test_validate_input_args_allows_auto_resume_for_bin_list_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_list = Path(tmp) / "bins.txt"
+            bin_list.write_text("/tmp/demo.bin\n", encoding="utf-8")
+
+            single_bin.validate_input_args(
+                Namespace(
+                    bin=None,
+                    bin_list=str(bin_list),
+                    name=None,
+                    archive_id=None,
+                    interval=20000000,
+                    copies=1,
+                    resume_after="auto",
+                    max_workers=3,
+                    allow_new_archives=False,
+                )
+            )
+
+    def test_validate_input_args_rejects_stage_resume_for_bin_list_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_list = Path(tmp) / "bins.txt"
+            bin_list.write_text("/tmp/demo.bin\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "auto"):
+                single_bin.validate_input_args(
+                    Namespace(
+                        bin=None,
+                        bin_list=str(bin_list),
+                        name=None,
+                        archive_id=None,
+                        interval=20000000,
+                        copies=1,
+                        resume_after="cluster",
+                        max_workers=3,
+                        allow_new_archives=False,
                     )
                 )
 
@@ -181,6 +234,145 @@ class SingleBinCheckpointTests(unittest.TestCase):
 
             with self.assertRaisesRegex(FileNotFoundError, "2444"):
                 single_bin.validate_outputs(str(archive_root), "demo")
+
+    def test_detect_auto_resume_state_classifies_archive_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_root = Path(tmp) / "archive"
+
+            fresh = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            self.assertEqual(fresh["state"], "fresh")
+            self.assertIsNone(fresh["resume_after"])
+
+            (archive_root / "profiling-0" / "demo").mkdir(parents=True)
+            (archive_root / "profiling-0" / "demo" / "simpoint_bbv.gz").write_text(
+                "bbv", encoding="utf-8"
+            )
+            profiling = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            self.assertEqual(profiling["state"], "after_profiling")
+            self.assertEqual(profiling["resume_after"], "profiling")
+
+            cluster_dir = archive_root / "cluster-0-0" / "demo"
+            cluster_dir.mkdir(parents=True)
+            (cluster_dir / "simpoints0").write_text("55 0\n2444 1\n", encoding="utf-8")
+            (cluster_dir / "weights0").write_text("0.5 0\n0.5 1\n", encoding="utf-8")
+            partial_dir = archive_root / "checkpoint-0-0-0" / "demo" / "55"
+            partial_dir.mkdir(parents=True)
+            (partial_dir / "_55_0.5_memory_.zstd").write_text(
+                "checkpoint", encoding="utf-8"
+            )
+            checkpoint = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            self.assertEqual(checkpoint["state"], "after_cluster")
+            self.assertEqual(checkpoint["resume_after"], "cluster")
+            self.assertEqual(checkpoint["missing_points"], ["2444"])
+
+            complete_dir = archive_root / "checkpoint-0-0-0" / "demo" / "2444"
+            complete_dir.mkdir(parents=True)
+            (complete_dir / "_2444_0.5_memory_.zstd").write_text(
+                "checkpoint", encoding="utf-8"
+            )
+            complete = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            self.assertEqual(complete["state"], "complete")
+            self.assertTrue(complete["skip"])
+
+    def test_prepare_auto_resume_preserves_partial_checkpoints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_root = Path(tmp) / "archive"
+            profiling_dir = archive_root / "profiling-0" / "demo"
+            cluster_dir = archive_root / "cluster-0-0" / "demo"
+            checkpoint_root = archive_root / "checkpoint-0-0-0" / "demo"
+            profiling_dir.mkdir(parents=True)
+            cluster_dir.mkdir(parents=True)
+            (checkpoint_root / "55").mkdir(parents=True)
+
+            (profiling_dir / "simpoint_bbv.gz").write_text("bbv", encoding="utf-8")
+            (cluster_dir / "simpoints0").write_text("55 0\n2444 1\n", encoding="utf-8")
+            (cluster_dir / "weights0").write_text("0.25 0\n0.75 1\n", encoding="utf-8")
+            (checkpoint_root / "55" / "_55_0.25_memory_.zstd").write_text(
+                "checkpoint", encoding="utf-8"
+            )
+
+            state = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            resume_after = single_bin.prepare_auto_resume_artifacts(
+                str(archive_root), "demo", state
+            )
+
+            self.assertEqual(resume_after, "cluster")
+            self.assertTrue((checkpoint_root / "55" / "_55_0.25_memory_.zstd").exists())
+            self.assertEqual(
+                (cluster_dir / "simpoints0").read_text(encoding="utf-8"),
+                "2444 0\n",
+            )
+            self.assertEqual(
+                (cluster_dir / "weights0").read_text(encoding="utf-8"),
+                "0.75 0\n",
+            )
+            self.assertEqual(
+                (cluster_dir / "simpoints0.auto-resume-full").read_text(encoding="utf-8"),
+                "55 0\n2444 1\n",
+            )
+
+            filtered_state = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            self.assertEqual(filtered_state["missing_points"], ["2444"])
+
+            single_bin.restore_auto_resume_artifacts(str(archive_root), "demo")
+            self.assertEqual(
+                (cluster_dir / "simpoints0").read_text(encoding="utf-8"),
+                "55 0\n2444 1\n",
+            )
+
+    def test_plan_batch_auto_resume_finds_latest_archives_and_skips_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_parent = Path(tmp) / "archive"
+            archive_parent.mkdir()
+            bin_dir = Path(tmp) / "bins"
+            bin_dir.mkdir()
+            alpha_bin = bin_dir / "alpha.bin"
+            beta_bin = bin_dir / "beta.bin"
+            alpha_bin.write_text("alpha", encoding="utf-8")
+            beta_bin.write_text("beta", encoding="utf-8")
+
+            old_alpha = archive_parent / "single_bin_nemu_alpha.bin_2026-05-01-00-00-00"
+            new_alpha = archive_parent / "single_bin_nemu_alpha.bin_2026-05-02-00-00-00"
+            beta = archive_parent / "single_bin_nemu_beta.bin_2026-05-02-00-00-00"
+            for path in [old_alpha, new_alpha, beta]:
+                path.mkdir()
+
+            (new_alpha / "profiling-0" / "alpha.bin").mkdir(parents=True)
+            (new_alpha / "profiling-0" / "alpha.bin" / "simpoint_bbv.gz").write_text(
+                "bbv", encoding="utf-8"
+            )
+
+            (beta / "profiling-0" / "beta.bin").mkdir(parents=True)
+            (beta / "profiling-0" / "beta.bin" / "simpoint_bbv.gz").write_text(
+                "bbv", encoding="utf-8"
+            )
+            (beta / "cluster-0-0" / "beta.bin").mkdir(parents=True)
+            (beta / "cluster-0-0" / "beta.bin" / "simpoints0").write_text(
+                "7 0\n", encoding="utf-8"
+            )
+            (beta / "cluster-0-0" / "beta.bin" / "weights0").write_text(
+                "1.0 0\n", encoding="utf-8"
+            )
+            (beta / "checkpoint-0-0-0" / "beta.bin" / "7").mkdir(parents=True)
+            (beta / "checkpoint-0-0-0" / "beta.bin" / "7" / "_7_1.0.zstd").write_text(
+                "checkpoint", encoding="utf-8"
+            )
+
+            planned, skipped = single_bin.plan_batch_auto_resume(
+                [
+                    {"bin": str(alpha_bin), "name": "alpha.bin"},
+                    {"bin": str(beta_bin), "name": "beta.bin"},
+                ],
+                archive_parent=str(archive_parent),
+                allow_new_archives=False,
+            )
+
+            self.assertEqual(len(planned), 1)
+            self.assertEqual(planned[0]["archive_id"], new_alpha.name)
+            self.assertEqual(planned[0]["resume_after"], "profiling")
+            self.assertEqual(len(skipped), 1)
+            self.assertEqual(skipped[0]["name"], "beta.bin")
+            self.assertTrue(skipped[0]["skipped"])
 
     def test_reset_stage_outputs_clears_stale_outputs_for_fresh_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -284,6 +476,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 copies=1,
                 resume_after=None,
                 max_workers=3,
+                allow_new_archives=False,
             )
 
             parser = mock.Mock()
@@ -339,6 +532,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 copies=2,
                 resume_after=None,
                 max_workers=3,
+                allow_new_archives=False,
             )
 
             parser = mock.Mock()
@@ -394,6 +588,79 @@ class SingleBinCheckpointTests(unittest.TestCase):
                         mem_bind="1",
                     ),
                 ]
+            )
+
+    def test_main_auto_resume_plans_unfinished_bin_list_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bins"
+            bin_dir.mkdir()
+            alpha_bin = bin_dir / "alpha.bin"
+            alpha_bin.write_text("alpha", encoding="utf-8")
+
+            bin_list = Path(tmp) / "bins.txt"
+            bin_list.write_text(f"{alpha_bin}\n", encoding="utf-8")
+
+            args = Namespace(
+                bin=None,
+                bin_list=str(bin_list),
+                name=None,
+                archive_id=None,
+                interval=20000000,
+                copies=2,
+                resume_after="auto",
+                max_workers=3,
+                allow_new_archives=False,
+            )
+
+            parser = mock.Mock()
+            parser.parse_args.return_value = args
+            future_alpha = mock.Mock()
+            future_alpha.result.return_value = {
+                "name": "alpha.bin",
+                "archive_id": "archive-alpha",
+                "checkpoint_count": 3,
+                "checkpoint_dir": "/tmp/archive-alpha/checkpoint-0-0-0/alpha.bin",
+            }
+
+            with mock.patch.object(single_bin, "build_arg_parser", return_value=parser), \
+                 mock.patch.object(
+                     single_bin,
+                     "plan_batch_auto_resume",
+                     return_value=(
+                         [
+                             {
+                                 "bin": str(alpha_bin),
+                                 "name": "alpha.bin",
+                                 "archive_id": "archive-alpha",
+                                 "resume_after": "cluster",
+                             }
+                         ],
+                         [{"name": "beta.bin", "archive_id": "archive-beta", "skipped": True}],
+                     ),
+                 ) as plan_auto, \
+                 mock.patch.object(single_bin, "run_single_checkpoint") as run_single, \
+                 mock.patch.object(single_bin.concurrent.futures, "ThreadPoolExecutor") as pool_cls, \
+                 mock.patch.object(single_bin.concurrent.futures, "as_completed", return_value=[future_alpha]):
+                pool = pool_cls.return_value.__enter__.return_value
+                pool.submit.return_value = future_alpha
+                exit_code = single_bin.main()
+
+            self.assertEqual(exit_code, 0)
+            plan_auto.assert_called_once_with(
+                [{"bin": str(alpha_bin), "name": "alpha.bin"}],
+                archive_parent="archive",
+                allow_new_archives=False,
+            )
+            pool.submit.assert_called_once_with(
+                run_single,
+                bin_path=str(alpha_bin),
+                workload_name="alpha.bin",
+                archive_id="archive-alpha",
+                interval=20000000,
+                copies=2,
+                resume_after="cluster",
+                cpu_bind="0",
+                mem_bind="0",
             )
 
 

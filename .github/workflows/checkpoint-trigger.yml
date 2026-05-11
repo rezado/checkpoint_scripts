@@ -17,6 +17,10 @@ on:
         description: Absolute path to a text file listing one bin path per line
         required: false
         type: string
+      archive_id:
+        description: Existing archive id for single-bin resume
+        required: false
+        type: string
       interval:
         description: Checkpoint interval
         required: false
@@ -27,6 +31,16 @@ on:
         required: false
         default: "3"
         type: string
+      resume_after:
+        description: Resume mode, use auto with bin_list to reuse previous archives
+        required: false
+        default: ""
+        type: string
+      allow_new_archives:
+        description: Allow auto resume to create archives for missing previous runs
+        required: false
+        default: "false"
+        type: boolean
       rebuild_nemu:
         description: Rebuild only NEMU before running the checkpoint flow
         required: false
@@ -49,6 +63,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          clean: false
 
       - name: Run checkpoint flow
         working-directory: checkpoint_scripts
@@ -66,8 +82,11 @@ jobs:
           BIN_PATH="${{ github.event.inputs.bin }}"
           BIN_LIST_PATH="${{ github.event.inputs.bin_list }}"
           WORKLOAD_NAME="${{ github.event.inputs.name }}"
+          ARCHIVE_ID_INPUT="${{ github.event.inputs.archive_id }}"
           INTERVAL="${{ github.event.inputs.interval }}"
           MAX_WORKERS="${{ github.event.inputs.max_workers }}"
+          RESUME_AFTER="${{ github.event.inputs.resume_after }}"
+          ALLOW_NEW_ARCHIVES="${{ github.event.inputs.allow_new_archives }}"
           REBUILD_NEMU="${{ github.event.inputs.rebuild_nemu }}"
           NEMU_OVERRIDE_HOME="${{ github.event.inputs.nemu_home }}"
           NEMU_DEFCONFIG="${{ github.event.inputs.nemu_defconfig }}"
@@ -85,6 +104,11 @@ jobs:
             exit 1
           fi
 
+          if [[ -n "$BIN_LIST_PATH" && -n "$ARCHIVE_ID_INPUT" ]]; then
+            echo "ERROR: archive_id can only be used with single-bin mode"
+            exit 1
+          fi
+
           if [[ -z "$BIN_PATH" && -z "$BIN_LIST_PATH" ]]; then
             echo "ERROR: either 'bin' or 'bin_list' must be provided"
             exit 1
@@ -98,6 +122,29 @@ jobs:
           if [[ ! "$MAX_WORKERS" =~ ^[0-9]+$ ]] || [[ "$MAX_WORKERS" -le 0 ]]; then
             echo "ERROR: max_workers must be a positive integer, got: $MAX_WORKERS"
             exit 1
+          fi
+
+          if [[ -n "$RESUME_AFTER" && "$RESUME_AFTER" != "auto" && "$RESUME_AFTER" != "profiling" && "$RESUME_AFTER" != "cluster" ]]; then
+            echo "ERROR: resume_after must be empty, auto, profiling, or cluster; got: $RESUME_AFTER"
+            exit 1
+          fi
+
+          if [[ -n "$RESUME_AFTER" && "$RESUME_AFTER" != "auto" && -z "$ARCHIVE_ID_INPUT" ]]; then
+            echo "ERROR: archive_id is required for single-bin resume_after=$RESUME_AFTER"
+            exit 1
+          fi
+
+          if [[ "$ALLOW_NEW_ARCHIVES" != "true" && "$ALLOW_NEW_ARCHIVES" != "false" ]]; then
+            echo "ERROR: allow_new_archives must be true or false, got: $ALLOW_NEW_ARCHIVES"
+            exit 1
+          fi
+
+          EXTRA_ARGS=()
+          if [[ -n "$RESUME_AFTER" ]]; then
+            EXTRA_ARGS+=(--resume-after "$RESUME_AFTER")
+          fi
+          if [[ "$ALLOW_NEW_ARCHIVES" == "true" ]]; then
+            EXTRA_ARGS+=(--allow-new-archives)
           fi
 
           if [[ "$REBUILD_NEMU" == "true" ]]; then
@@ -127,9 +174,13 @@ jobs:
           fi
 
           if [[ -n "$BIN_PATH" ]]; then
-            ARCHIVE_STAMP="$(date +%Y%m%d-%H%M%S)"
-            ARCHIVE_SAFE_NAME="$(printf '%s' "$WORKLOAD_NAME" | tr -cs 'A-Za-z0-9._-' '-')"
-            ARCHIVE_ID="${ARCHIVE_SAFE_NAME}-${ARCHIVE_STAMP}"
+            if [[ -n "$ARCHIVE_ID_INPUT" ]]; then
+              ARCHIVE_ID="$ARCHIVE_ID_INPUT"
+            else
+              ARCHIVE_STAMP="$(date +%Y%m%d-%H%M%S)"
+              ARCHIVE_SAFE_NAME="$(printf '%s' "$WORKLOAD_NAME" | tr -cs 'A-Za-z0-9._-' '-')"
+              ARCHIVE_ID="${ARCHIVE_SAFE_NAME}-${ARCHIVE_STAMP}"
+            fi
 
             if [[ -z "$WORKLOAD_NAME" ]]; then
               echo "ERROR: 'name' is required when using 'bin'"
@@ -150,7 +201,8 @@ jobs:
               --bin "$BIN_PATH" \
               --name "$WORKLOAD_NAME" \
               --archive-id "$ARCHIVE_ID" \
-              --interval "$INTERVAL"
+              --interval "$INTERVAL" \
+              "${EXTRA_ARGS[@]}"
 
             {
               echo "## Single-Bin Checkpoint Result"
@@ -159,6 +211,8 @@ jobs:
               echo "- bin: \`$BIN_PATH\`"
               echo "- interval: \`$INTERVAL\`"
               echo "- max_workers: \`$MAX_WORKERS\`"
+              echo "- resume_after: \`${RESUME_AFTER:-fresh}\`"
+              echo "- allow_new_archives: \`$ALLOW_NEW_ARCHIVES\`"
               echo "- archive_id: \`$ARCHIVE_ID\`"
               echo "- archive_dir: \`$GITHUB_WORKSPACE/checkpoint_scripts/archive/$ARCHIVE_ID\`"
               echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
@@ -181,7 +235,8 @@ jobs:
             bash run_single_bin_checkpoint.sh \
               --bin-list "$BIN_LIST_PATH" \
               --interval "$INTERVAL" \
-              --max-workers "$MAX_WORKERS"
+              --max-workers "$MAX_WORKERS" \
+              "${EXTRA_ARGS[@]}"
 
             {
               echo "## Batch Checkpoint Result"
@@ -190,6 +245,8 @@ jobs:
               echo "- entries: \`$ENTRY_COUNT\`"
               echo "- interval: \`$INTERVAL\`"
               echo "- max_workers: \`$MAX_WORKERS\`"
+              echo "- resume_after: \`${RESUME_AFTER:-fresh}\`"
+              echo "- allow_new_archives: \`$ALLOW_NEW_ARCHIVES\`"
               echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
               echo "- nemu_home: \`${NEMU_OVERRIDE_HOME:-$NEMU_HOME}\`"
               echo "- nemu_defconfig: \`$NEMU_DEFCONFIG\`"
