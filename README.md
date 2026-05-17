@@ -9,9 +9,10 @@
 ### 常用场景
 
 - 单 bin 模式
-    - 填写 `name` + `bin`
-- 批量模式
-    - 填写 `bin_list`
+    - 填写 `input_path`
+    - 如果需要自定义 workload 名，再额外填写 `name`
+- 多 bin 模式
+    - 填写一个包含多个 bin 的目录到 `input_path`
 
 ### 关键输入
 
@@ -28,23 +29,26 @@
 
 ### 单 bin 示例
 
+- `input_path`: `/abs/path/to/my_bzip2.fw_payload.bin`
 - `name`: `my_bzip2`
-- `bin`: `/abs/path/to/my_bzip2`
 - `interval`: `20000000`
 - `nemu_home`: `/nfs/home/wujiabin/work/xs-env/NEMU`
 
-### 批量示例
+### 多 bin 示例
 
-- `bin_list`: `/nfs/home/wujiabin/work/checkpoint_scripts/workload_list.txt`
+- `input_path`: `/nfs-nvme/home/share/debug/xuyinan/temp/20260509-ckpt/spec2006_new/bin`
 - `interval`: `20000000`
 - `max_workers`: `3`
 - `nemu_home`: `/nfs/home/wujiabin/work/xs-env/NEMU`
 
 ### 说明
 
-- `name` 只在单 bin 模式需要填写
-- `bin` 和 `bin_list` 二选一
-- 批量模式下，每个 workload 会生成各自独立的 archive
+- `input_path` 必填，既可以是单个 bin 文件，也可以是一个目录
+- 目录模式下会自动扫描其中的 bin 文件
+- 目录模式下所有 workload 会汇总到同一个 archive 中
+- 目录模式下 workload 名会通过所有 bin 文件名的公共后缀自动推导，例如 `.bin` 或 `.fw_payload.bin`
+- 默认 stage 目录名为 `profiling`、`cluster`、`checkpoint`
+- postprocess 结果会放到 `json/` 目录下，其中包括每个 workload 的单独 JSON，以及 `checkpoints_all.json`、`checkpoints_cov0.3.json`
 
 ## 环境准备
 
@@ -190,45 +194,43 @@ archive_id_config: # 配置生成的 archive id，仅影响结果放置在哪里
 python3 generate_checkpoint.py --config config.yaml
 ```
 - 单 bin 一键 checkpoint
-    - 适用场景：已经有一个可直接启动的 GCPT bin，希望直接对这个 bin 执行完整的 `profiling -> cluster -> checkpoint` 流程
+    - 适用场景：已经有一个可直接启动的 GCPT bin，或者一个存放多个 bin 的目录，希望直接执行完整的 `profiling -> cluster -> checkpoint` 流程
     - 这条路径固定使用 NEMU，不会重新编译 Linux、rootfs、OpenSBI 或 workload
     - 输入文件必须是可以直接启动的 GCPT bin，而不是普通 ELF 或裸 bin
     - 运行前至少需要保证 `NEMU_HOME` 已设置，且 `riscv64-nemu-interpreter` 与 `simpoint` 已正确构建
 
 ```
 bash checkpoint_scripts/run_single_bin_checkpoint.sh \
-  --bin /path/to/your.bin \
+  --input-path /path/to/your.bin \
   --name your_workload \
   --archive-id your_archive_id
 ```
 
     - 参数说明
-        - `--bin`：输入 bin 的路径，必填
-        - `--name`：workload 名称，必填，会同时用于结果目录名
+        - `--input-path`：输入路径，必填；可以是单个 bin 文件，或者是一个包含多个 bin 文件的目录
+        - `--name`：单文件模式下的 workload 名称，可选；不传时会自动由文件名去掉后缀推导
         - `--archive-id`：输出 archive 名称，可选；不指定时会自动生成
         - `--interval`：checkpoint 间隔，可选，默认 `20000000`
         - `--copies`：核数，可选，默认 `1`
-        - `--max-workers`：批量模式的最大并行 workload 数，可选，默认 `3`
-        - `--resume-after profiling|cluster`：从已有 profiling 或 cluster 结果继续执行，可选
-        - `--bin-list`：批量模式使用的文本文件路径；文件中每行一个 bin 路径，支持空行和 `#` 注释；使用该模式时不再传 `--bin`、`--name`、`--archive-id`、`--resume-after`
-            - workload 名会自动取对应 bin 文件名
-            - 每个 bin 会生成各自独立的 archive
+        - `--max-workers`：目录模式下的最大并行 workload 数，可选，默认 `3`
+        - `--resume-after profiling|cluster|auto`：从已有 archive 的中间阶段继续执行，可选；使用时需要配合 `--archive-id`
+            - 目录模式下，推荐直接对整个共享 archive 使用同一个 `--archive-id`
     - GitHub Action 手动触发
         - 快速使用见 README 开头的 [GitHub Action 快速使用](#github-action-快速使用)
-        - 如果这里只看输入规则：`bin` 和 `bin_list` 二选一；批量模式可额外设置 `max_workers`；`nemu_home` 可覆盖默认 `NEMU_HOME`
+        - 如果这里只看输入规则：统一使用 `input_path`；目录模式可额外设置 `max_workers`；`nemu_home` 可覆盖默认 `NEMU_HOME`
 
     - 示例
 ```
 bash checkpoint_scripts/run_single_bin_checkpoint.sh \
-  --bin /nfs/home/wujiabin/work/checkpoint_scripts/checkpoint_scripts/archive/custom_gcc12.2.0_rv64gcb_base_custom_test_QEMU_testgroup_2026-03-31-17-19/gcpt_bins/my_bzip2 \
+  --input-path /nfs/home/wujiabin/work/checkpoint_scripts/checkpoint_scripts/archive/custom_gcc12.2.0_rv64gcb_base_custom_test_QEMU_testgroup_2026-03-31-17-19/gcpt_bins/my_bzip2 \
   --name my_bzip2 \
   --archive-id my-bzip2-run
 ```
 
-    - 批量示例
+    - 多 bin 示例
 ```
 bash checkpoint_scripts/run_single_bin_checkpoint.sh \
-  --bin-list /path/to/bin-list.txt \
+  --input-path /path/to/bin-directory \
   --interval 20000000 \
   --max-workers 3
 ```

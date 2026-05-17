@@ -32,7 +32,7 @@ class RunSingleBinWrapperTests(unittest.TestCase):
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
             completed = subprocess.run(
-                ["bash", str(WRAPPER_SCRIPT), "--bin", "/tmp/demo.bin", "--name", "demo"],
+                ["bash", str(WRAPPER_SCRIPT), "--input-path", "/tmp/demo.bin", "--name", "demo"],
                 cwd=REPO_ROOT,
                 env=env,
                 capture_output=True,

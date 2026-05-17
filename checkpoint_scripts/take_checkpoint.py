@@ -9,6 +9,9 @@ import subprocess
 import threading
 from collections import deque
 from config import BaseConfig
+from checkpoint_layout import checkpoint_stage_name
+from checkpoint_layout import cluster_stage_name
+from checkpoint_layout import profiling_stage_name
 
 class TakeCheckpointConfig(BaseConfig):
     def __init__(self, start_id, times, path_env_vars_to_check=["NEMU_HOME", "QEMU_HOME"], env_vars_to_check=None):
@@ -336,11 +339,15 @@ def qemu_checkpoint_command(config, is_resume_from):
 def profiling_func(profiling_id, config, dry_run=False):
     profiling_config = copy.deepcopy(config)
 
-    profiling_config["profiling"]["config"] = "{}-{}".format(
-        profiling_config["profiling"]["basename"], profiling_id)
+    profiling_config["profiling"]["config"] = profiling_stage_name(profiling_id)
 
-    profiling_config["out-log"] = os.path.join(config["utils"]["log_folder"], "profiling-{}".format(profiling_id), config["utils"]["workload"], "profiling.out.log")
-    profiling_config["err-log"] = os.path.join(config["utils"]["log_folder"], "profiling-{}".format(profiling_id), config["utils"]["workload"], "profiling.err.log")
+    profiling_log_dir = os.path.join(config["utils"]["log_folder"],
+                                     profiling_stage_name(profiling_id),
+                                     config["utils"]["workload"])
+    profiling_config["out-log"] = os.path.join(profiling_log_dir,
+                                               "profiling.out.log")
+    profiling_config["err-log"] = os.path.join(profiling_log_dir,
+                                               "profiling.err.log")
     profiling_config["execute_mode"] = "profiling"
 
     if not dry_run:
@@ -349,8 +356,10 @@ def profiling_func(profiling_id, config, dry_run=False):
         else:
             profiling_config["command"] = qemu_profiling_command(profiling_config)
     else:
-        bak_out_log_path = os.path.join(config["utils"]["log_folder"], "profiling-{}".format(profiling_id), config["utils"]["workload"], "old_profiling.out.log")
-        bak_err_log_path = os.path.join(config["utils"]["log_folder"], "profiling-{}".format(profiling_id), config["utils"]["workload"], "old_profiling.err.log")
+        bak_out_log_path = os.path.join(profiling_log_dir,
+                                        "old_profiling.out.log")
+        bak_err_log_path = os.path.join(profiling_log_dir,
+                                        "old_profiling.err.log")
         profiling_config["backup_commands"] = [['cp', profiling_config["out-log"], bak_out_log_path], ['cp', profiling_config["err-log"], bak_err_log_path]]
         profiling_config["command"] = ["echo", '"dry_run_profiling_command"']
 
@@ -362,16 +371,19 @@ def profiling_func(profiling_id, config, dry_run=False):
 def cluster_func(profiling_id, cluster_id, config, is_resume_from=False, dry_run=False):
     cluster_config = copy.deepcopy(config)
 
-    cluster_config["profiling"]["config"] = "{}-{}".format(
-        cluster_config["profiling"]["basename"], profiling_id)
+    cluster_config["profiling"]["config"] = profiling_stage_name(profiling_id)
 
-    cluster_config["cluster"]["config"] = "{}-{}-{}".format(
-        cluster_config["cluster"]["basename"], profiling_id, cluster_id)
+    cluster_config["cluster"]["config"] = cluster_stage_name(
+        profiling_id, cluster_id)
 
     cluster_config["execute_mode"] = "cluster"
 
-    cluster_config["out-log"] = os.path.join(config["utils"]["log_folder"], "cluster-{}-{}".format(profiling_id, cluster_id), config["utils"]["workload"],"cluster.out.log")
-    cluster_config["err-log"] = os.path.join(config["utils"]["log_folder"], "cluster-{}-{}".format(profiling_id, cluster_id), config["utils"]["workload"],"cluster.err.log")
+    cluster_log_dir = os.path.join(config["utils"]["log_folder"],
+                                   cluster_stage_name(profiling_id,
+                                                      cluster_id),
+                                   config["utils"]["workload"])
+    cluster_config["out-log"] = os.path.join(cluster_log_dir, "cluster.out.log")
+    cluster_config["err-log"] = os.path.join(cluster_log_dir, "cluster.err.log")
 
     if not dry_run:
         cluster_config["command"] = cluster_command(cluster_config, is_resume_from=is_resume_from)
@@ -387,20 +399,25 @@ def cluster_func(profiling_id, cluster_id, config, is_resume_from=False, dry_run
 def checkpoint_func(profiling_id, cluster_id, checkpoint_id, config, is_resume_from=False):
     checkpoint_config = copy.deepcopy(config)
 
-    checkpoint_config["profiling"]["config"] = "{}-{}".format(
-        checkpoint_config["profiling"]["basename"], profiling_id)
+    checkpoint_config["profiling"]["config"] = profiling_stage_name(
+        profiling_id)
 
-    checkpoint_config["cluster"]["config"] = "{}-{}-{}".format(
-        checkpoint_config["cluster"]["basename"], profiling_id, cluster_id)
+    checkpoint_config["cluster"]["config"] = cluster_stage_name(
+        profiling_id, cluster_id)
 
-    checkpoint_config["checkpoint"]["config"] = "{}-{}-{}-{}".format(
-        checkpoint_config["checkpoint"]["basename"], profiling_id, cluster_id,
-        checkpoint_id)
+    checkpoint_config["checkpoint"]["config"] = checkpoint_stage_name(
+        profiling_id, cluster_id, checkpoint_id)
 
     checkpoint_config["execute_mode"] = "checkpoint"
 
-    checkpoint_config["out-log"] = os.path.join(config["utils"]["log_folder"], "checkpoint-{}-{}-{}".format(profiling_id, cluster_id, checkpoint_id), config["utils"]["workload"], "checkpoint.out.log")
-    checkpoint_config["err-log"] = os.path.join(config["utils"]["log_folder"], "checkpoint-{}-{}-{}".format(profiling_id, cluster_id, checkpoint_id), config["utils"]["workload"], "checkpoint.err.log")
+    checkpoint_log_dir = os.path.join(
+        config["utils"]["log_folder"],
+        checkpoint_stage_name(profiling_id, cluster_id, checkpoint_id),
+        config["utils"]["workload"])
+    checkpoint_config["out-log"] = os.path.join(checkpoint_log_dir,
+                                                "checkpoint.out.log")
+    checkpoint_config["err-log"] = os.path.join(checkpoint_log_dir,
+                                                "checkpoint.err.log")
 
     if checkpoint_config["emu"] == "NEMU":
         checkpoint_config["command"] = nemu_checkpoint_command(

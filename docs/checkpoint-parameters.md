@@ -19,42 +19,31 @@ There are two main ways to generate checkpoints here:
 Entrypoint:
 - `checkpoint_scripts/run_single_bin_checkpoint.py`
 
-### `--bin`
+### `--input-path`
 
 - Category: input path
-- Purpose: path to the input GCPT-bootable bin file
-- Required: yes in single-bin mode
+- Purpose: path to the input GCPT-bootable bin file, or a directory containing multiple bin files
+- Required: yes
 - Effective range:
-  - Must be a readable file path
+  - Must be a readable existing file or directory path
 - Validation:
-  - File must exist
-  - File must be readable
-
-### `--bin-list`
-
-- Category: batch input path
-- Purpose: path to a text file containing one GCPT-bootable bin path per line
-- Required: yes in batch mode
-- Effective range:
-  - Must be a readable file path
-  - Supports blank lines and lines beginning with `#`
-- Default behavior:
-  - The workload name for each entry is derived from the bin file name
-- Validation:
-  - File must exist
-  - File must be readable
-  - Must contain at least one usable bin path
-  - Derived workload names must be unique within the list
+  - Path must exist
+  - Path must be readable
+  - If it is a directory, it must contain at least one file
 
 ### `--name`
 
 - Category: workload identity
 - Purpose: logical workload name; also used in output directory names
-- Required: yes in single-bin mode
+- Required: no
 - Effective range:
   - Any non-empty string
 - Validation:
-  - Must not be empty or whitespace only
+  - Only valid when `--input-path` is a single file
+  - Must not be empty or whitespace only when provided
+- Default behavior:
+  - If omitted in single-file mode, the script derives the name from the file name after stripping known suffixes
+  - In directory mode, all workload names are derived automatically from the shared filename suffix
 
 ### `--archive-id`
 
@@ -64,9 +53,8 @@ Entrypoint:
 - Effective range:
   - Any string that is valid as a directory name in the local filesystem
 - Default behavior:
-  - If omitted, the script generates `single_bin_nemu_<workload>_<timestamp>`
-- Notes:
-  - Only valid in single-bin mode
+  - If omitted for a single file, the script generates `single_bin_nemu_<workload>_<timestamp>`
+  - If omitted for a directory, the script generates `multi_bin_nemu_<timestamp>`
 
 ### `--interval`
 
@@ -100,10 +88,11 @@ Entrypoint:
 - Effective range:
   - `profiling`
   - `cluster`
+  - `auto`
 - Notes:
-  - `profiling` requires an existing `profiling-0/<workload>/simpoint_bbv.gz`
-  - `cluster` requires existing `cluster-0-0/<workload>/simpoints0` and `weights0`
-  - Only valid in single-bin mode
+  - `profiling` requires an existing `profiling/<workload>/simpoint_bbv.gz`
+  - `cluster` requires existing `cluster/<workload>/simpoints0` and `weights0`
+  - Any use of `--resume-after` requires `--archive-id`
 
 ## 2. Full-Flow YAML Parameters
 
@@ -502,11 +491,11 @@ These are fixed in the single-bin path today:
 - `mem_bind = "0"`
 - `all_in_one_workload = true`
 
-That means the single-bin path always generates:
+That means the default single-bin path always generates:
 
-- `profiling-0`
-- `cluster-0-0`
-- `checkpoint-0-0-0`
+- `profiling`
+- `cluster`
+- `checkpoint`
 
 ## 5. Practical Priorities
 

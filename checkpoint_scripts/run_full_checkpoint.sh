@@ -99,7 +99,7 @@ echo ""
 echo "========== [3/5] 验证 Profiling 结果 =========="
 ALL_PROFILING_OK=true
 for app in $SPEC_APPS; do
-    BBV="$ARCHIVE/profiling-0/$app/simpoint_bbv.gz"
+    BBV="$ARCHIVE/profiling/$app/simpoint_bbv.gz"
     if [[ -f "$BBV" ]]; then
         echo "  [OK] $app: $(ls -lh "$BBV" | awk '{print $5}')"
     else
@@ -114,11 +114,11 @@ echo ""
 echo "========== [4/5] Cluster (SimPoint 聚类) =========="
 for app in $SPEC_APPS; do
     echo "  Clustering: $app ..."
-    CLUSTER_DIR="$ARCHIVE/cluster-0-0/$app"
+    CLUSTER_DIR="$ARCHIVE/cluster/$app"
     mkdir -p "$CLUSTER_DIR"
-    mkdir -p "$ARCHIVE/logs/cluster-0-0/$app"
+    mkdir -p "$ARCHIVE/logs/cluster/$app"
 
-    BBV="$ARCHIVE/profiling-0/$app/simpoint_bbv.gz"
+    BBV="$ARCHIVE/profiling/$app/simpoint_bbv.gz"
     MAXK=30
     [[ "$app" == *"xalancbmk"* ]] && MAXK=100
 
@@ -135,7 +135,7 @@ for app in $SPEC_APPS; do
         -iters 1000 \
         -seedkm "$SEEDKM" \
         -seedproj "$SEEDPROJ" \
-        > "$ARCHIVE/logs/cluster-0-0/$app/cluster.out.log" 2>&1 \
+        > "$ARCHIVE/logs/cluster/$app/cluster.out.log" 2>&1 \
         || { echo "  [FAIL] $app cluster 失败"; exit 1; }
 
     NUM_SIMPOINTS=$(wc -l < "$CLUSTER_DIR/simpoints0")
@@ -150,12 +150,12 @@ ARCHIVE_ABS=$(realpath "$ARCHIVE")
 
 for app in $SPEC_APPS; do
     echo "  Checkpointing: $app ..."
-    CPT_LOG_DIR="$ARCHIVE/logs/checkpoint-0-0-0/$app"
+    CPT_LOG_DIR="$ARCHIVE/logs/checkpoint/$app"
     mkdir -p "$CPT_LOG_DIR"
 
     "$QEMU" \
         -bios "$ARCHIVE_ABS/gcpt_bins/$app" \
-        -M "nemu,simpoint-path=$ARCHIVE_ABS/cluster-0-0,workload=$app,cpt-interval=20000000,output-base-dir=$ARCHIVE_ABS,config-name=checkpoint-0-0-0,checkpoint-mode=SimpointCheckpoint" \
+        -M "nemu,simpoint-path=$ARCHIVE_ABS/cluster,workload=$app,cpt-interval=20000000,output-base-dir=$ARCHIVE_ABS,config-name=checkpoint,checkpoint-mode=SimpointCheckpoint" \
         -nographic \
         -m 8G \
         -smp "$COPIES" \
@@ -167,7 +167,7 @@ for app in $SPEC_APPS; do
         echo "  [FAIL] $app checkpoint 产物校验失败"
         exit 1
     fi
-    CPT_SIZE=$(du -sh "$ARCHIVE/checkpoint-0-0-0/$app" 2>/dev/null | awk '{print $1}')
+    CPT_SIZE=$(du -sh "$ARCHIVE/checkpoint/$app" 2>/dev/null | awk '{print $1}')
     echo "  [OK] $app: $NUM_CPT 个 checkpoint, 总大小 $CPT_SIZE"
 done
 
@@ -179,8 +179,8 @@ python3 dump_result.py \
     --spec-apps "$(echo "$SPEC_APPS" | tr ' ' ',')" \
     --times "1,1,1" \
     --ids "0,0,0"
-echo "  [OK] Generated $ARCHIVE/checkpoint-0-0-0/cluster-0-0.json"
-echo "  [OK] Generated $ARCHIVE/checkpoint-0-0-0/checkpoint.lst"
+echo "  [OK] Generated $ARCHIVE/json/checkpoints_all.json"
+echo "  [OK] Generated $ARCHIVE/checkpoint/checkpoint.lst"
 
 # ==================== 完成 ====================
 echo ""
@@ -191,7 +191,7 @@ echo ""
 echo "  结果概览:"
 for app in $SPEC_APPS; do
     NUM_CPT=$(count_checkpoints_py "$ARCHIVE_ABS" "$app")
-    CPT_SIZE=$(du -sh "$ARCHIVE/checkpoint-0-0-0/$app" 2>/dev/null | awk '{print $1}')
+    CPT_SIZE=$(du -sh "$ARCHIVE/checkpoint/$app" 2>/dev/null | awk '{print $1}')
     echo "    $app: $NUM_CPT checkpoints ($CPT_SIZE)"
 done
 echo "=========================================="
