@@ -95,8 +95,6 @@ def checkpoint_stage_name(profiling_id=0, cluster_id=0, checkpoint_id=0) -> str:
 
 def archive_layout(archive_root: str) -> dict[str, str]:
     return {
-        "buffer_path": archive_root,
-        "gcpt_bins": os.path.join(archive_root, "gcpt_bins"),
         "logs": os.path.join(archive_root, "logs"),
         "metadata": os.path.join(archive_root, "metadata"),
         "json": os.path.join(archive_root, "json"),
@@ -451,12 +449,6 @@ def validate_input_args(args) -> None:
         raise ValueError("--interval must be a positive integer")
 
 
-def copy_input_bin(src: str, dst: str) -> str:
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    shutil.copy2(src, dst)
-    return dst
-
-
 def ensure_resume_logs(archive_root: str, workload: str,
                        resume_after: str | None) -> None:
     if resume_after is None:
@@ -643,9 +635,6 @@ def run_workload(*,
     metadata_path = write_request_metadata(request_dir,
                                            request,
                                            filename=f"{workload_name}.yaml")
-    copied_bin = copy_input_bin(bin_path,
-                                os.path.join(layout["gcpt_bins"],
-                                             workload_name))
 
     reset_stage_outputs(
         archive_root,
@@ -661,7 +650,7 @@ def run_workload(*,
             profiling_rc = run_profiling_step(
                 archive_root=archive_root,
                 workload=workload_name,
-                workload_bin=copied_bin,
+                workload_bin=bin_path,
                 interval=interval,
                 cpu_bind=cpu_bind,
                 mem_bind=mem_bind,
@@ -687,7 +676,7 @@ def run_workload(*,
         checkpoint_rc = run_checkpoint_step(
             archive_root=archive_root,
             workload=workload_name,
-            workload_bin=copied_bin,
+            workload_bin=bin_path,
             interval=interval,
             cpu_bind=cpu_bind,
             mem_bind=mem_bind,

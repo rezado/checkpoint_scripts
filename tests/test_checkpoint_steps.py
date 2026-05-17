@@ -16,7 +16,7 @@ class CheckpointStepTests(unittest.TestCase):
     def test_profiling_command_uses_plain_stage_name(self):
         command = step_profiling.build_profiling_command(
             nemu_bin="/tmp/nemu",
-            workload_bin="/tmp/archive/gcpt_bins/demo",
+            workload_bin="/tmp/input/demo.bin",
             archive_root="/tmp/archive",
             workload="demo",
             interval=20000000,
@@ -27,7 +27,7 @@ class CheckpointStepTests(unittest.TestCase):
         self.assertIn("/tmp/nemu", command)
         self.assertIn("profiling", command)
         self.assertIn("--simpoint-profile", command)
-        self.assertIn("/tmp/archive/gcpt_bins/demo", command)
+        self.assertIn("/tmp/input/demo.bin", command)
 
     def test_cluster_command_uses_expected_paths(self):
         command = step_cluster.build_cluster_command(
@@ -63,7 +63,7 @@ class CheckpointStepTests(unittest.TestCase):
     def test_checkpoint_command_uses_cluster_root_and_plain_stage_name(self):
         command = step_checkpoint.build_checkpoint_command(
             nemu_bin="/tmp/nemu",
-            workload_bin="/tmp/archive/gcpt_bins/demo",
+            workload_bin="/tmp/input/demo.bin",
             archive_root="/tmp/archive",
             workload="demo",
             interval=20000000,
@@ -74,7 +74,7 @@ class CheckpointStepTests(unittest.TestCase):
         self.assertIn("checkpoint", command)
         self.assertIn("/tmp/archive/cluster", command)
         self.assertIn("--cpt-interval", command)
-        self.assertIn("/tmp/archive/gcpt_bins/demo", command)
+        self.assertIn("/tmp/input/demo.bin", command)
 
 
 if __name__ == "__main__":

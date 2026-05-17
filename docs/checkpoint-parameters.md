@@ -115,7 +115,6 @@ archive 顶层固定包含：
 - `logs/`
 - `metadata/`
 - `json/`
-- `gcpt_bins/`
 
 其中：
 - `json/checkpoints_all.json`

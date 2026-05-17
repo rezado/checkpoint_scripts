@@ -13,7 +13,6 @@
 - `logs`
 - `metadata`
 - `json`
-- `gcpt_bins`
 
 ## 流程拆分
 
@@ -121,7 +120,6 @@ GitHub Action 默认输出根目录是 `/nfs/home/share/<runner-username>/checkp
 /nfs/home/share/alice/checkpoint-trigger/2026-05-17-12-00-00_spec-bins/
 ├── checkpoint/
 ├── cluster/
-├── gcpt_bins/
 ├── json/
 ├── logs/
 ├── metadata/
@@ -129,8 +127,6 @@ GitHub Action 默认输出根目录是 `/nfs/home/share/<runner-username>/checkp
 ```
 
 说明：
-- `gcpt_bins/`
-  保存输入 bin 的归档副本，方便 resume 和结果复现
 - `metadata/`
   保存批量请求和每个 workload 的请求记录
 - `json/`

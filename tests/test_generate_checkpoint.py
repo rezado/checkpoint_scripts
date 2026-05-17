@@ -16,7 +16,6 @@ import generate_checkpoint as checkpoint_runner
 class RunCheckpointTests(unittest.TestCase):
     def test_build_archive_layout_contains_expected_paths(self):
         layout = checkpoint_runner.build_archive_layout("/tmp/archive/demo")
-        self.assertEqual(layout["gcpt_bins"], "/tmp/archive/demo/gcpt_bins")
         self.assertEqual(layout["logs"], "/tmp/archive/demo/logs")
         self.assertEqual(layout["metadata"], "/tmp/archive/demo/metadata")
         self.assertEqual(layout["json"], "/tmp/archive/demo/json")
