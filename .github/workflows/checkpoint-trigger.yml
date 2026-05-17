@@ -186,17 +186,17 @@ jobs:
           echo "INFO: output_base_input=${OUTPUT_BASE_INPUT:-auto}"
           echo "INFO: checkpoint_output_base=$CHECKPOINT_OUTPUT_BASE"
 
-          PYTHON_OUTPUT="$(
-            python3 generate_checkpoint.py \
+          RUN_LOG="$(mktemp)"
+          trap 'rm -f "$RUN_LOG"' EXIT
+
+          python3 -u generate_checkpoint.py \
             --input-path "$INPUT_PATH" \
             --interval "$INTERVAL" \
             --max-workers "$MAX_WORKERS" \
-            "${EXTRA_ARGS[@]}"
-          )"
-          printf '%s\n' "$PYTHON_OUTPUT"
+            "${EXTRA_ARGS[@]}" | tee "$RUN_LOG"
 
-          ACTUAL_ARCHIVE_ID="$(printf '%s\n' "$PYTHON_OUTPUT" | sed -n 's/^Archive: //p' | tail -n 1)"
-          ACTUAL_ARCHIVE_ROOT="$(printf '%s\n' "$PYTHON_OUTPUT" | sed -n 's/^Archive root: //p' | tail -n 1)"
+          ACTUAL_ARCHIVE_ID="$(sed -n 's/^Archive: //p' "$RUN_LOG" | tail -n 1)"
+          ACTUAL_ARCHIVE_ROOT="$(sed -n 's/^Archive root: //p' "$RUN_LOG" | tail -n 1)"
 
           {
             echo "## Checkpoint Result"

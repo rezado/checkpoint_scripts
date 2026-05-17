@@ -11,6 +11,9 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import generate_checkpoint as checkpoint_runner
+import step_checkpoint
+import step_cluster
+import step_profiling
 
 
 class RunCheckpointTests(unittest.TestCase):
@@ -93,6 +96,60 @@ class RunCheckpointTests(unittest.TestCase):
             )
 
         self.assertEqual(archive_id, "2026-05-17-12-00-00_spec-bins")
+
+    def test_run_workload_prints_stage_progress(self):
+        with mock.patch.object(
+            checkpoint_runner, "build_archive_layout", return_value={
+                "logs": "/tmp/archive/logs",
+                "metadata": "/tmp/archive/metadata",
+                "json": "/tmp/archive/json",
+            }
+        ), mock.patch.object(
+            checkpoint_runner, "ensure_directories"
+        ), mock.patch.object(
+            checkpoint_runner, "load_nemu_paths"
+        ), mock.patch.object(
+            checkpoint_runner, "write_request_metadata", return_value="/tmp/archive/metadata/demo.yaml"
+        ), mock.patch.object(
+            checkpoint_runner, "reset_stage_outputs"
+        ), mock.patch.object(
+            checkpoint_runner, "validate_resume_artifacts"
+        ), mock.patch.object(
+            checkpoint_runner, "ensure_resume_logs"
+        ), mock.patch.object(
+            checkpoint_runner, "validate_outputs"
+        ), mock.patch.object(
+            checkpoint_runner, "clear_aggregate_metadata"
+        ), mock.patch.object(
+            checkpoint_runner, "generate_checkpoint_metadata"
+        ), mock.patch.object(
+            checkpoint_runner, "count_checkpoints", return_value=2
+        ), mock.patch.object(
+            step_profiling, "run_profiling_step", return_value=0
+        ), mock.patch.object(
+            step_cluster, "run_cluster_step"
+        ), mock.patch.object(
+            step_checkpoint, "run_checkpoint_step", return_value=0
+        ), mock.patch(
+            "builtins.print"
+        ) as mock_print:
+            checkpoint_runner.run_workload(
+                bin_path="/tmp/demo.bin",
+                workload_name="demo",
+                archive_root="/tmp/archive",
+                interval=20000000,
+                resume_after=None,
+            )
+
+        rendered = "\n".join(" ".join(str(arg) for arg in call.args) for call in mock_print.call_args_list)
+        self.assertIn("[Profiling] start workload=demo", rendered)
+        self.assertIn("[Profiling] done workload=demo", rendered)
+        self.assertIn("[Clustering] start workload=demo", rendered)
+        self.assertIn("[Clustering] done workload=demo", rendered)
+        self.assertIn("[Checkpoint] start workload=demo", rendered)
+        self.assertIn("[Checkpoint] done workload=demo", rendered)
+        self.assertIn("[Metadata] start workload=demo", rendered)
+        self.assertIn("[Metadata] done workload=demo", rendered)
 
     def test_load_input_entries_for_directory_uses_common_suffix(self):
         with tempfile.TemporaryDirectory() as tmp:

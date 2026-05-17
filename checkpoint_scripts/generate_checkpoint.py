@@ -635,6 +635,10 @@ def run_workload(*,
     metadata_path = write_request_metadata(request_dir,
                                            request,
                                            filename=f"{workload_name}.yaml")
+    print(
+        f"[Workload] name={workload_name} archive={os.path.basename(archive_root)} input={os.path.realpath(bin_path)}",
+        flush=True,
+    )
 
     reset_stage_outputs(
         archive_root,
@@ -647,6 +651,10 @@ def run_workload(*,
 
     try:
         if effective_resume_after is None:
+            print(
+                f"[Profiling] start workload={workload_name} interval={interval} cpu={cpu_bind} mem={mem_bind}",
+                flush=True,
+            )
             profiling_rc = run_profiling_step(
                 archive_root=archive_root,
                 workload=workload_name,
@@ -657,22 +665,53 @@ def run_workload(*,
             )
             if profiling_rc != 0:
                 print(f"Warning: profiling exited with code {profiling_rc} for {workload_name}")
+            else:
+                print(
+                    f"[Profiling] done workload={workload_name} log={profiling_log_dir(archive_root, workload_name)}",
+                    flush=True,
+                )
+            print(
+                f"[Clustering] start workload={workload_name} cpu={cpu_bind} mem={mem_bind}",
+                flush=True,
+            )
             run_cluster_step(
                 archive_root=archive_root,
                 workload=workload_name,
                 cpu_bind=cpu_bind,
                 mem_bind=mem_bind,
             )
+            print(
+                f"[Clustering] done workload={workload_name} log={cluster_log_dir(archive_root, workload_name)}",
+                flush=True,
+            )
         elif effective_resume_after == "profiling":
+            print(
+                f"[Clustering] resume workload={workload_name} from=profiling cpu={cpu_bind} mem={mem_bind}",
+                flush=True,
+            )
             run_cluster_step(
                 archive_root=archive_root,
                 workload=workload_name,
                 cpu_bind=cpu_bind,
                 mem_bind=mem_bind,
+            )
+            print(
+                f"[Clustering] done workload={workload_name} log={cluster_log_dir(archive_root, workload_name)}",
+                flush=True,
             )
         elif effective_resume_after != "cluster":
             raise ValueError(f"unsupported resume stage: {effective_resume_after}")
 
+        if effective_resume_after == "cluster":
+            print(
+                f"[Checkpoint] resume workload={workload_name} from=cluster cpu={cpu_bind} mem={mem_bind}",
+                flush=True,
+            )
+        else:
+            print(
+                f"[Checkpoint] start workload={workload_name} interval={interval} cpu={cpu_bind} mem={mem_bind}",
+                flush=True,
+            )
         checkpoint_rc = run_checkpoint_step(
             archive_root=archive_root,
             workload=workload_name,
@@ -684,12 +723,18 @@ def run_workload(*,
         if checkpoint_rc != 0:
             print(
                 f"Warning: checkpoint step exited with code {checkpoint_rc} for {workload_name}")
+        else:
+            print(
+                f"[Checkpoint] done workload={workload_name} log={checkpoint_log_dir(archive_root, workload_name)}",
+                flush=True,
+            )
     finally:
         if resume_after == AUTO_RESUME:
             restore_auto_resume_artifacts(archive_root, workload_name)
 
     validate_outputs(archive_root, workload_name)
     if generate_metadata:
+        print(f"[Metadata] start workload={workload_name}", flush=True)
         clear_aggregate_metadata(archive_root)
         generate_checkpoint_metadata(
             archive_root=archive_root,
@@ -697,8 +742,13 @@ def run_workload(*,
             times=[1, 1, 1],
             ids=[0, 0, 0],
         )
+        print(f"[Metadata] done workload={workload_name}", flush=True)
 
     workload_checkpoint_dir = checkpoint_dir(archive_root, workload_name)
+    print(
+        f"[Workload] done name={workload_name} checkpoints={count_checkpoints(archive_root, workload_name)} dir={workload_checkpoint_dir}",
+        flush=True,
+    )
     return {
         "name": workload_name,
         "archive_id": os.path.basename(archive_root),
@@ -766,8 +816,8 @@ def main() -> int:
                 "resume_after": args.resume_after,
             },
         )
-        print(f"Archive: {archive_id}")
-        print(f"Archive root: {archive_root}")
+        print(f"Archive: {archive_id}", flush=True)
+        print(f"Archive root: {archive_root}", flush=True)
         run_workload(
             bin_path=entries[0]["bin"],
             workload_name=entries[0]["name"],
@@ -798,12 +848,12 @@ def main() -> int:
         filename="batch_request.yaml",
     )
 
-    print(f"Batch size: {len(entries)}")
-    print(f"Archive: {archive_id}")
-    print(f"Archive root: {archive_root}")
-    print(f"Max workers: {args.max_workers}")
+    print(f"Batch size: {len(entries)}", flush=True)
+    print(f"Archive: {archive_id}", flush=True)
+    print(f"Archive root: {archive_root}", flush=True)
+    print(f"Max workers: {args.max_workers}", flush=True)
     if common_suffix:
-        print(f"Derived common suffix: {common_suffix}")
+        print(f"Derived common suffix: {common_suffix}", flush=True)
 
     results = []
     failures = []
@@ -816,7 +866,8 @@ def main() -> int:
         for index, entry in enumerate(entries):
             cpu_bind, mem_bind = get_worker_bindings(index)
             print(
-                f"=== [{index + 1}/{len(entries)}] Checkpointing {entry['name']} from {entry['bin']} (cpu={cpu_bind}, mem={mem_bind}) ==="
+                f"=== [{index + 1}/{len(entries)}] Checkpointing {entry['name']} from {entry['bin']} (cpu={cpu_bind}, mem={mem_bind}) ===",
+                flush=True,
             )
             future = executor.submit(run_workload,
                                      bin_path=entry["bin"],
@@ -838,23 +889,26 @@ def main() -> int:
                 failures.append({"name": entry["name"], "error": str(exc)})
 
     if failures:
-        print("Batch failures:")
+        print("Batch failures:", flush=True)
         for failure in failures:
-            print(f"- {failure['name']}: {failure['error']}")
+            print(f"- {failure['name']}: {failure['error']}", flush=True)
         return 1
 
+    print("[Metadata] start workload=batch", flush=True)
     generate_checkpoint_metadata(
         archive_root=archive_root,
         workloads=[entry["name"] for entry in entries],
         times=[1, 1, 1],
         ids=[0, 0, 0],
     )
+    print("[Metadata] done workload=batch", flush=True)
 
-    print("Batch summary:")
+    print("Batch summary:", flush=True)
     for result in results:
         suffix = ", skipped=complete" if result.get("skipped") else ""
         print(
-            f"- {result['name']}: archive={result['archive_id']}, checkpoints={result['checkpoint_count']}, dir={result['checkpoint_dir']}{suffix}"
+            f"- {result['name']}: archive={result['archive_id']}, checkpoints={result['checkpoint_count']}, dir={result['checkpoint_dir']}{suffix}",
+            flush=True,
         )
     return 0
 
