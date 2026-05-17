@@ -36,6 +36,7 @@ class CheckpointStepTests(unittest.TestCase):
             workload="demo",
             cpu_bind="1",
             mem_bind="0",
+            max_k=None,
             seedkm=111111,
             seedproj=222222,
         )
@@ -53,6 +54,37 @@ class CheckpointStepTests(unittest.TestCase):
             workload="xalancbmk",
             cpu_bind="0",
             mem_bind="0",
+            max_k=None,
+            seedkm=111111,
+            seedproj=222222,
+        )
+
+        maxk_index = command.index("-maxK")
+        self.assertEqual(command[maxk_index + 1], "100")
+
+    def test_cluster_command_uses_requested_max_k_when_larger_than_default(self):
+        command = step_cluster.build_cluster_command(
+            simpoint_bin="/tmp/simpoint",
+            archive_root="/tmp/archive",
+            workload="demo",
+            cpu_bind="0",
+            mem_bind="0",
+            max_k=80,
+            seedkm=111111,
+            seedproj=222222,
+        )
+
+        maxk_index = command.index("-maxK")
+        self.assertEqual(command[maxk_index + 1], "80")
+
+    def test_cluster_command_preserves_workload_floor_for_requested_max_k(self):
+        command = step_cluster.build_cluster_command(
+            simpoint_bin="/tmp/simpoint",
+            archive_root="/tmp/archive",
+            workload="xalancbmk",
+            cpu_bind="0",
+            mem_bind="0",
+            max_k=60,
             seedkm=111111,
             seedproj=222222,
         )

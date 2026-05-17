@@ -50,9 +50,10 @@ class RunCheckpointTests(unittest.TestCase):
     def test_parse_args_accepts_max_workers(self):
         parser = checkpoint_runner.build_arg_parser()
         args = parser.parse_args(
-            ["--input-path", "/tmp/bins", "--max-workers", "3"]
+            ["--input-path", "/tmp/bins", "--max-workers", "3", "--max-k", "40"]
         )
         self.assertEqual(args.max_workers, 3)
+        self.assertEqual(args.max_k, 40)
 
     def test_resolve_output_base_dir_defaults_to_local_archive(self):
         with mock.patch.dict(
@@ -138,6 +139,7 @@ class RunCheckpointTests(unittest.TestCase):
                 workload_name="demo",
                 archive_root="/tmp/archive",
                 interval=20000000,
+                max_k=40,
                 resume_after=None,
             )
 
@@ -200,6 +202,7 @@ class RunCheckpointTests(unittest.TestCase):
                         name="demo",
                         archive_id=None,
                         interval=20000000,
+                        max_k=None,
                         resume_after=None,
                         max_workers=3,
                     )
@@ -217,6 +220,7 @@ class RunCheckpointTests(unittest.TestCase):
                         name=None,
                         archive_id=None,
                         interval=20000000,
+                        max_k=None,
                         resume_after="cluster",
                         max_workers=3,
                     )
@@ -234,8 +238,27 @@ class RunCheckpointTests(unittest.TestCase):
                         name=None,
                         archive_id=None,
                         interval=20000000,
+                        max_k=None,
                         resume_after=None,
                         max_workers=0,
+                    )
+                )
+
+    def test_validate_input_args_rejects_non_positive_max_k(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_bin = Path(tmp) / "demo.bin"
+            input_bin.write_text("demo", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "max-k"):
+                checkpoint_runner.validate_input_args(
+                    Namespace(
+                        input_path=str(input_bin),
+                        name=None,
+                        archive_id=None,
+                        interval=20000000,
+                        max_k=0,
+                        resume_after=None,
+                        max_workers=3,
                     )
                 )
 
@@ -477,6 +500,7 @@ class RunCheckpointTests(unittest.TestCase):
                 name="demo",
                 archive_id="demo-archive",
                 interval=20000000,
+                max_k=40,
                 resume_after=None,
                 max_workers=3,
             )
@@ -511,6 +535,7 @@ class RunCheckpointTests(unittest.TestCase):
                 workload_name="demo",
                 archive_root=expected_archive_root,
                 interval=20000000,
+                max_k=40,
                 resume_after=None,
             )
 
@@ -528,6 +553,7 @@ class RunCheckpointTests(unittest.TestCase):
                 name=None,
                 archive_id="shared-archive",
                 interval=20000000,
+                max_k=40,
                 resume_after=None,
                 max_workers=3,
             )
@@ -599,6 +625,7 @@ class RunCheckpointTests(unittest.TestCase):
                         workload_name="alpha",
                         archive_root=expected_archive_root,
                         interval=20000000,
+                        max_k=40,
                         resume_after=None,
                         cpu_bind="0",
                         mem_bind="0",
@@ -611,6 +638,7 @@ class RunCheckpointTests(unittest.TestCase):
                         workload_name="beta",
                         archive_root=expected_archive_root,
                         interval=20000000,
+                        max_k=40,
                         resume_after=None,
                         cpu_bind="1",
                         mem_bind="1",

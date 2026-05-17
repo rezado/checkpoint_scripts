@@ -51,6 +51,16 @@
 - 必须是正整数
 - 会同时传给 profiling 和 checkpoint 阶段
 
+### `--max-k`
+
+- 可选
+- 用于覆盖 SimPoint 聚类时的 `-maxK`
+- 必须是正整数
+- 实际生效值是 `max(内置 workload 默认值, 用户输入值)`
+- 当前内置特例：
+  - `xalancbmk` 最低为 `100`
+  - 其它 workload 最低为 `30`
+
 ### `--max-workers`
 
 - 可选

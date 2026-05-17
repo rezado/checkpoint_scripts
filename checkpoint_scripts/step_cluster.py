@@ -9,10 +9,11 @@ from generate_checkpoint import load_nemu_paths
 from generate_checkpoint import profiling_dir
 
 
-def max_k_for_workload(workload: str) -> int:
-    if workload == "xalancbmk":
-        return 100
-    return 30
+def max_k_for_workload(workload: str, requested_max_k: int | None = None) -> int:
+    default_max_k = 100 if workload == "xalancbmk" else 30
+    if requested_max_k is None:
+        return default_max_k
+    return max(default_max_k, requested_max_k)
 
 
 def build_cluster_command(*,
@@ -21,6 +22,7 @@ def build_cluster_command(*,
                           workload: str,
                           cpu_bind: str,
                           mem_bind: str,
+                          max_k: int | None,
                           seedkm: int,
                           seedproj: int) -> list[str]:
     output_dir = cluster_dir(archive_root, workload)
@@ -37,7 +39,7 @@ def build_cluster_command(*,
         os.path.join(output_dir, "weights0"),
         "-inputVectorsGzipped",
         "-maxK",
-        str(max_k_for_workload(workload)),
+        str(max_k_for_workload(workload, max_k)),
         "-numInitSeeds",
         "2",
         "-iters",
@@ -52,6 +54,7 @@ def build_cluster_command(*,
 def run_cluster_step(*,
                      archive_root: str,
                      workload: str,
+                     max_k: int | None = None,
                      cpu_bind: str = "0",
                      mem_bind: str = "0") -> None:
     nemu_paths = load_nemu_paths()
@@ -65,6 +68,7 @@ def run_cluster_step(*,
         workload=workload,
         cpu_bind=cpu_bind,
         mem_bind=mem_bind,
+        max_k=max_k,
         seedkm=random.randint(100000, 999999),
         seedproj=random.randint(100000, 999999),
     )
@@ -80,6 +84,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the clustering step")
     parser.add_argument("--archive-root", required=True)
     parser.add_argument("--workload", required=True)
+    parser.add_argument("--max-k", type=int)
     parser.add_argument("--cpu-bind", default="0")
     parser.add_argument("--mem-bind", default="0")
     return parser
@@ -90,6 +95,7 @@ def main() -> int:
     run_cluster_step(
         archive_root=args.archive_root,
         workload=args.workload,
+        max_k=args.max_k,
         cpu_bind=args.cpu_bind,
         mem_bind=args.mem_bind,
     )

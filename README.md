@@ -45,6 +45,8 @@
   仅 GitHub Action 可用；指定 CI 输出根目录，默认是 `/nfs/home/share/<runner-username>/checkpoint-trigger`
 - `interval`
   checkpoint 间隔，默认 `20000000`
+- `max_k`
+  可选；覆盖 SimPoint `-maxK`，实际生效值是 `max(内置 workload 默认值, 用户输入值)`
 - `max_workers`
   目录模式下的最大并行 workload 数，默认 `3`
 - `resume_after`
@@ -82,6 +84,7 @@ python3 checkpoint_scripts/generate_checkpoint.py \
 python3 checkpoint_scripts/generate_checkpoint.py \
   --input-path /path/to/bin-directory \
   --interval 20000000 \
+  --max-k 40 \
   --max-workers 3
 ```
 

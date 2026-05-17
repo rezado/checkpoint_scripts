@@ -447,6 +447,8 @@ def validate_input_args(args) -> None:
         raise ValueError("--max-workers must be at least 1")
     if args.interval <= 0:
         raise ValueError("--interval must be a positive integer")
+    if args.max_k is not None and args.max_k <= 0:
+        raise ValueError("--max-k must be a positive integer")
 
 
 def ensure_resume_logs(archive_root: str, workload: str,
@@ -501,6 +503,7 @@ def reset_stage_outputs(archive_root: str, workload: str,
 def build_single_run_args(input_path: str, workload_name: str | None,
                           archive_id: str | None, interval: int,
                           max_workers: int,
+                          max_k: int | None,
                           resume_after: str | None) -> argparse.Namespace:
     return argparse.Namespace(
         input_path=input_path,
@@ -508,6 +511,7 @@ def build_single_run_args(input_path: str, workload_name: str | None,
         archive_id=archive_id,
         interval=interval,
         max_workers=max_workers,
+        max_k=max_k,
         resume_after=resume_after,
     )
 
@@ -593,6 +597,7 @@ def run_workload(*,
                  workload_name: str,
                  archive_root: str,
                  interval: int,
+                 max_k: int | None,
                  resume_after: str | None,
                  cpu_bind: str = "0",
                  mem_bind: str = "0",
@@ -629,6 +634,7 @@ def run_workload(*,
         "name": workload_name,
         "archive_id": os.path.basename(archive_root),
         "interval": interval,
+        "max_k": max_k,
         "resume_after": resume_after,
     }
     request_dir = metadata_dir or layout["metadata"]
@@ -677,6 +683,7 @@ def run_workload(*,
             run_cluster_step(
                 archive_root=archive_root,
                 workload=workload_name,
+                max_k=max_k,
                 cpu_bind=cpu_bind,
                 mem_bind=mem_bind,
             )
@@ -692,6 +699,7 @@ def run_workload(*,
             run_cluster_step(
                 archive_root=archive_root,
                 workload=workload_name,
+                max_k=max_k,
                 cpu_bind=cpu_bind,
                 mem_bind=mem_bind,
             )
@@ -774,6 +782,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         type=int,
                         default=20_000_000,
                         help="Checkpoint interval")
+    parser.add_argument("--max-k",
+                        type=int,
+                        help="Optional SimPoint maxK override; effective value is max(workload default, user value)")
     parser.add_argument("--max-workers",
                         type=int,
                         default=3,
@@ -797,6 +808,7 @@ def main() -> int:
                                   archive_id=args.archive_id,
                                   interval=args.interval,
                                   max_workers=args.max_workers,
+                                  max_k=args.max_k,
                                   resume_after=args.resume_after))
 
     if input_mode == "file":
@@ -813,6 +825,7 @@ def main() -> int:
                 "name": entries[0]["name"],
                 "archive_id": archive_id,
                 "interval": args.interval,
+                "max_k": args.max_k,
                 "resume_after": args.resume_after,
             },
         )
@@ -823,6 +836,7 @@ def main() -> int:
             workload_name=entries[0]["name"],
             archive_root=archive_root,
             interval=args.interval,
+            max_k=args.max_k,
             resume_after=args.resume_after,
         )
         return 0
@@ -840,6 +854,7 @@ def main() -> int:
             "input_path": os.path.realpath(args.input_path),
             "archive_id": archive_id,
             "interval": args.interval,
+            "max_k": args.max_k,
             "resume_after": args.resume_after,
             "max_workers": args.max_workers,
             "common_suffix": common_suffix or "",
@@ -852,6 +867,8 @@ def main() -> int:
     print(f"Archive: {archive_id}", flush=True)
     print(f"Archive root: {archive_root}", flush=True)
     print(f"Max workers: {args.max_workers}", flush=True)
+    if args.max_k is not None:
+        print(f"Max k override: {args.max_k}", flush=True)
     if common_suffix:
         print(f"Derived common suffix: {common_suffix}", flush=True)
 
@@ -874,6 +891,7 @@ def main() -> int:
                                      workload_name=entry["name"],
                                      archive_root=archive_root,
                                      interval=args.interval,
+                                     max_k=args.max_k,
                                      resume_after=args.resume_after,
                                      cpu_bind=cpu_bind,
                                      mem_bind=mem_bind,

@@ -27,6 +27,11 @@ on:
         required: false
         default: "20000000"
         type: string
+      max_k:
+        description: Optional SimPoint maxK override; default 30, except xalancbmk uses 100
+        required: false
+        default: ""
+        type: string
       max_workers:
         description: Maximum parallel workloads used in directory mode
         required: false
@@ -86,6 +91,7 @@ jobs:
           WORKLOAD_NAME="${{ github.event.inputs.name }}"
           ARCHIVE_ID_INPUT="${{ github.event.inputs.archive_id }}"
           INTERVAL="${{ github.event.inputs.interval }}"
+          MAX_K_INPUT="${{ github.event.inputs.max_k }}"
           MAX_WORKERS="${{ github.event.inputs.max_workers }}"
           RESUME_AFTER="${{ github.event.inputs.resume_after }}"
           REBUILD_NEMU="${{ github.event.inputs.rebuild_nemu }}"
@@ -115,6 +121,11 @@ jobs:
             exit 1
           fi
 
+          if [[ -n "$MAX_K_INPUT" ]] && { [[ ! "$MAX_K_INPUT" =~ ^[0-9]+$ ]] || [[ "$MAX_K_INPUT" -le 0 ]]; }; then
+            echo "ERROR: max_k must be a positive integer when provided, got: $MAX_K_INPUT"
+            exit 1
+          fi
+
           if [[ ! "$MAX_WORKERS" =~ ^[0-9]+$ ]] || [[ "$MAX_WORKERS" -le 0 ]]; then
             echo "ERROR: max_workers must be a positive integer, got: $MAX_WORKERS"
             exit 1
@@ -141,6 +152,9 @@ jobs:
           fi
           if [[ -n "$ARCHIVE_ID_INPUT" ]]; then
             EXTRA_ARGS+=(--archive-id "$ARCHIVE_ID_INPUT")
+          fi
+          if [[ -n "$MAX_K_INPUT" ]]; then
+            EXTRA_ARGS+=(--max-k "$MAX_K_INPUT")
           fi
           if [[ -n "$RESUME_AFTER" ]]; then
             EXTRA_ARGS+=(--resume-after "$RESUME_AFTER")
@@ -180,6 +194,7 @@ jobs:
           echo "INFO: input_path=$INPUT_PATH"
           echo "INFO: input_kind=$INPUT_KIND"
           echo "INFO: interval=$INTERVAL"
+          echo "INFO: max_k=${MAX_K_INPUT:-auto}"
           echo "INFO: max_workers=$MAX_WORKERS"
           echo "INFO: archive_id=${ARCHIVE_ID_INPUT:-auto}"
           echo "INFO: checkpoint_username=$CHECKPOINT_USERNAME"
@@ -205,6 +220,7 @@ jobs:
             echo "- input_kind: \`$INPUT_KIND\`"
             echo "- name: \`${WORKLOAD_NAME:-auto}\`"
             echo "- interval: \`$INTERVAL\`"
+            echo "- max_k: \`${MAX_K_INPUT:-auto}\`"
             echo "- max_workers: \`$MAX_WORKERS\`"
             echo "- resume_after: \`${RESUME_AFTER:-fresh}\`"
             echo "- archive_id: \`${ACTUAL_ARCHIVE_ID:-${ARCHIVE_ID_INPUT:-auto}}\`"
