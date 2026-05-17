@@ -5,36 +5,36 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from checkpoint_layout import checkpoint_stage_name
-from checkpoint_layout import cluster_stage_name
-from checkpoint_layout import profiling_stage_name
-from checkpoint_postprocess import cluster_weight
-from checkpoint_postprocess import generate_checkpoint_metadata
-from take_checkpoint import TakeCheckpointConfig
-from take_checkpoint import generate_command
-from take_checkpoint import level_first_exec
+from checkpoint_env import load_nemu_paths
+from checkpoint_layout import archive_layout
+from checkpoint_layout import checkpoint_dir
+from checkpoint_layout import checkpoint_list_path
+from checkpoint_layout import checkpoint_log_dir
+from checkpoint_layout import cluster_dir
+from checkpoint_layout import cluster_log_dir
+from checkpoint_layout import profiling_dir
+from checkpoint_layout import profiling_log_dir
+from checkpoint_layout import workload_json_path
+from step_checkpoint import count_checkpoints
+from step_checkpoint import run_checkpoint_step
+from step_checkpoint import validate_outputs
+from step_metadata import cluster_weight
+from step_metadata import generate_checkpoint_metadata
+from step_profiling import run_profiling_step
+from step_cluster import run_cluster_step
 
-COMPRESSED_CHECKPOINT_SUFFIXES = (".gz", ".zstd")
+
 AUTO_RESUME = "auto"
 COMPLETE_STATE = "complete"
 AUTO_RESUME_BACKUP_SUFFIX = "auto-resume-full"
-KNOWN_BIN_SUFFIXES = (
+KNOWN_WORKLOAD_SUFFIXES = (
     ".fw_payload.bin",
-    ".payload.bin",
-    ".gcpt.bin",
-    ".gcpt",
     ".bin",
 )
 
 
 def build_archive_layout(archive_root: str) -> dict[str, str]:
-    return {
-        "buffer_path": archive_root,
-        "gcpt_bins": os.path.join(archive_root, "gcpt_bins"),
-        "logs": os.path.join(archive_root, "logs"),
-        "metadata": os.path.join(archive_root, "metadata"),
-        "json": os.path.join(archive_root, "json"),
-    }
+    return archive_layout(archive_root)
 
 
 def ensure_directories(paths) -> None:
@@ -49,53 +49,13 @@ def safe_name(value: str) -> str:
 def generate_archive_id(mode: str, workload: str | None = None) -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     if mode == "file":
-        return f"single_bin_nemu_{safe_name(workload or 'workload')}_{timestamp}"
-    return f"multi_bin_nemu_{timestamp}"
-
-
-def stage_names() -> dict[str, str]:
-    return {
-        "profiling": profiling_stage_name(),
-        "cluster": cluster_stage_name(),
-        "checkpoint": checkpoint_stage_name(),
-    }
-
-
-def profiling_dir(archive_root: str, workload: str) -> str:
-    return os.path.join(archive_root, stage_names()["profiling"], workload)
-
-
-def cluster_dir(archive_root: str, workload: str) -> str:
-    return os.path.join(archive_root, stage_names()["cluster"], workload)
-
-
-def checkpoint_dir(archive_root: str, workload: str) -> str:
-    return os.path.join(archive_root, stage_names()["checkpoint"], workload)
-
-
-def profiling_log_dir(archive_root: str, workload: str) -> str:
-    return os.path.join(archive_root, "logs", stage_names()["profiling"], workload)
-
-
-def cluster_log_dir(archive_root: str, workload: str) -> str:
-    return os.path.join(archive_root, "logs", stage_names()["cluster"], workload)
-
-
-def checkpoint_log_dir(archive_root: str, workload: str) -> str:
-    return os.path.join(archive_root, "logs", stage_names()["checkpoint"], workload)
-
-
-def workload_json_path(archive_root: str, workload: str) -> str:
-    return os.path.join(archive_root, "json", f"{workload}.json")
-
-
-def checkpoint_list_path(archive_root: str) -> str:
-    return os.path.join(archive_root, stage_names()["checkpoint"], "checkpoint.lst")
+        return f"checkpoint_{safe_name(workload or 'workload')}_{timestamp}"
+    return f"checkpoint_batch_{timestamp}"
 
 
 def write_request_metadata(metadata_dir: str,
                            request: dict,
-                           filename: str = "single_bin_request.yaml") -> str:
+                           filename: str = "request.yaml") -> str:
     os.makedirs(metadata_dir, exist_ok=True)
     output_path = os.path.join(metadata_dir, filename)
     lines = []
@@ -109,6 +69,13 @@ def write_request_metadata(metadata_dir: str,
     with open(output_path, "w", encoding="utf-8") as handle:
         handle.write("\n".join(str(line) for line in lines) + "\n")
     return output_path
+
+
+def remove_path(path: str) -> None:
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    elif os.path.exists(path):
+        os.remove(path)
 
 
 def clear_aggregate_metadata(archive_root: str) -> None:
@@ -151,17 +118,19 @@ def parse_simpoint_points(simpoints_path: str) -> list[str]:
 def read_cluster_rows(cluster_output_dir: str) -> tuple[dict[str, str], dict[str, str]]:
     simpoint_rows = {}
     weight_rows = {}
-    simpoints_path = os.path.join(cluster_output_dir, "simpoints0")
-    weights_path = os.path.join(cluster_output_dir, "weights0")
 
-    with open(simpoints_path, "r", encoding="utf-8") as handle:
+    with open(os.path.join(cluster_output_dir, "simpoints0"),
+              "r",
+              encoding="utf-8") as handle:
         for raw_line in handle:
             parts = raw_line.split()
             if len(parts) >= 2:
                 point, cluster_id = parts[0], parts[1]
                 simpoint_rows[point] = cluster_id
 
-    with open(weights_path, "r", encoding="utf-8") as handle:
+    with open(os.path.join(cluster_output_dir, "weights0"),
+              "r",
+              encoding="utf-8") as handle:
         for raw_line in handle:
             parts = raw_line.split()
             if len(parts) >= 2:
@@ -174,12 +143,12 @@ def read_cluster_rows(cluster_output_dir: str) -> tuple[dict[str, str], dict[str
 def checkpoint_point_has_artifact(point_dir: str) -> bool:
     if not os.path.isdir(point_dir):
         return False
-    return any(name.endswith(COMPRESSED_CHECKPOINT_SUFFIXES)
-               for name in os.listdir(point_dir))
+    return any(name.endswith((".gz", ".zstd")) for name in os.listdir(point_dir))
 
 
 def detect_auto_resume_state(archive_root: str, workload: str) -> dict[str, object]:
-    profiling_path = os.path.join(profiling_dir(archive_root, workload), "simpoint_bbv.gz")
+    profiling_path = os.path.join(profiling_dir(archive_root, workload),
+                                  "simpoint_bbv.gz")
     workload_cluster_dir = cluster_dir(archive_root, workload)
     simpoints_path = os.path.join(workload_cluster_dir, "simpoints0")
     weights_path = os.path.join(workload_cluster_dir, "weights0")
@@ -210,10 +179,10 @@ def detect_auto_resume_state(archive_root: str, workload: str) -> dict[str, obje
         }
 
     expected_points = parse_simpoint_points(simpoints_read_path)
-    present_points = []
-    for point in expected_points:
-        if checkpoint_point_has_artifact(os.path.join(workload_checkpoint_dir, point)):
-            present_points.append(point)
+    present_points = [
+        point for point in expected_points
+        if checkpoint_point_has_artifact(os.path.join(workload_checkpoint_dir, point))
+    ]
     missing_points = [
         point for point in expected_points if point not in set(present_points)
     ]
@@ -284,78 +253,6 @@ def prepare_auto_resume_artifacts(archive_root: str, workload: str,
     return resume_after
 
 
-def validate_outputs(archive_root: str, workload: str) -> None:
-    required = [
-        os.path.join(profiling_dir(archive_root, workload), "simpoint_bbv.gz"),
-        os.path.join(cluster_dir(archive_root, workload), "simpoints0"),
-        os.path.join(cluster_dir(archive_root, workload), "weights0"),
-    ]
-    for path in required:
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"expected output missing: {path}")
-
-    workload_checkpoint_dir = checkpoint_dir(archive_root, workload)
-    if not os.path.isdir(workload_checkpoint_dir):
-        raise FileNotFoundError(
-            f"expected checkpoint output directory missing: {workload_checkpoint_dir}")
-
-    checkpoint_count = sum(
-        1 for root, _, files in os.walk(workload_checkpoint_dir)
-        for name in files if name.endswith(COMPRESSED_CHECKPOINT_SUFFIXES))
-    if checkpoint_count == 0:
-        raise FileNotFoundError(
-            f"no compressed checkpoint artifacts found under: {workload_checkpoint_dir}")
-
-    expected_points = cluster_weight(
-        os.path.join(archive_root, stage_names()["cluster"]), workload)
-    missing_points = []
-    for point in sorted(expected_points):
-        point_dir = os.path.join(workload_checkpoint_dir, point)
-        if not os.path.isdir(point_dir):
-            missing_points.append(point)
-            continue
-
-        has_artifact = any(
-            name.endswith(COMPRESSED_CHECKPOINT_SUFFIXES)
-            for name in os.listdir(point_dir))
-        if not has_artifact:
-            missing_points.append(point)
-
-    if missing_points:
-        raise FileNotFoundError(
-            "missing compressed checkpoint artifacts for expected simpoints: "
-            + ", ".join(missing_points))
-
-
-def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=
-        "Run profiling, cluster, and checkpoint from one bin or a directory of bins with NEMU",
-    )
-    parser.add_argument("--input-path",
-                        required=True,
-                        help="Path to a GCPT-bootable bin file or a directory of bin files")
-    parser.add_argument("--name",
-                        help="Optional workload name override used only with a single input file")
-    parser.add_argument("--archive-id", help="Existing or new archive id")
-    parser.add_argument("--interval",
-                        type=int,
-                        default=20_000_000,
-                        help="Checkpoint interval")
-    parser.add_argument("--copies",
-                        type=int,
-                        default=1,
-                        help="Core count passed to the checkpoint flow")
-    parser.add_argument("--max-workers",
-                        type=int,
-                        default=3,
-                        help="Maximum parallel workloads used in directory mode")
-    parser.add_argument("--resume-after",
-                        choices=["profiling", "cluster", AUTO_RESUME],
-                        help="Resume from a later stage")
-    return parser
-
-
 def inspect_input_kind(input_path: str) -> str:
     if os.path.isfile(input_path):
         return "file"
@@ -377,23 +274,10 @@ def validate_input_args(args) -> None:
     if args.resume_after is not None and args.archive_id is None:
         raise ValueError("--archive-id is required when using --resume-after")
 
-    if args.copies < 1:
-        raise ValueError("--copies must be at least 1")
     if args.max_workers < 1:
         raise ValueError("--max-workers must be at least 1")
     if args.interval <= 0:
         raise ValueError("--interval must be a positive integer")
-
-
-def validate_runtime_tools(nemu_home: str) -> None:
-    required = [
-        os.path.join(nemu_home, "build", "riscv64-nemu-interpreter"),
-        os.path.join(nemu_home, "resource", "simpoint", "simpoint_repo", "bin",
-                     "simpoint"),
-    ]
-    for path in required:
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"required runtime tool missing: {path}")
 
 
 def copy_input_bin(src: str, dst: str) -> str:
@@ -413,13 +297,6 @@ def ensure_resume_logs(archive_root: str, workload: str,
         if not os.path.exists(path):
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("")
-
-
-def remove_path(path: str) -> None:
-    if os.path.isdir(path):
-        shutil.rmtree(path)
-    elif os.path.exists(path):
-        os.remove(path)
 
 
 def reset_stage_outputs(archive_root: str, workload: str,
@@ -458,22 +335,15 @@ def reset_stage_outputs(archive_root: str, workload: str,
             remove_path(path)
 
 
-def count_checkpoints(archive_root: str, workload: str) -> int:
-    workload_checkpoint_dir = checkpoint_dir(archive_root, workload)
-    return sum(
-        1 for root, _, files in os.walk(workload_checkpoint_dir)
-        for name in files if name.endswith(COMPRESSED_CHECKPOINT_SUFFIXES))
-
-
 def build_single_run_args(input_path: str, workload_name: str | None,
-                          archive_id: str | None, interval: int, copies: int,
-                          max_workers: int, resume_after: str | None) -> argparse.Namespace:
+                          archive_id: str | None, interval: int,
+                          max_workers: int,
+                          resume_after: str | None) -> argparse.Namespace:
     return argparse.Namespace(
         input_path=input_path,
         name=workload_name,
         archive_id=archive_id,
         interval=interval,
-        copies=copies,
         max_workers=max_workers,
         resume_after=resume_after,
     )
@@ -485,7 +355,7 @@ def get_worker_bindings(index: int, numa_nodes: int = 2) -> tuple[str, str]:
 
 
 def strip_known_bin_suffix(file_name: str) -> str:
-    for suffix in KNOWN_BIN_SUFFIXES:
+    for suffix in KNOWN_WORKLOAD_SUFFIXES:
         if file_name.endswith(suffix) and len(file_name) > len(suffix):
             return file_name[:-len(suffix)]
     return Path(file_name).stem
@@ -499,7 +369,7 @@ def longest_common_suffix(names: list[str]) -> str:
 
 
 def derive_common_bin_suffix(names: list[str]) -> str:
-    for suffix in KNOWN_BIN_SUFFIXES:
+    for suffix in KNOWN_WORKLOAD_SUFFIXES:
         if all(name.endswith(suffix) for name in names):
             return suffix
 
@@ -515,8 +385,7 @@ def derive_common_bin_suffix(names: list[str]) -> str:
 
 
 def derive_directory_entries(input_dir: str) -> tuple[list[dict[str, str]], str]:
-    files = sorted(
-        entry for entry in Path(input_dir).iterdir() if entry.is_file())
+    files = sorted(entry for entry in Path(input_dir).iterdir() if entry.is_file())
     if not files:
         raise ValueError(f"input directory does not contain any files: {input_dir}")
 
@@ -556,31 +425,31 @@ def load_input_entries(input_path: str,
     return "directory", entries, common_suffix
 
 
-def run_single_checkpoint(*, bin_path: str, workload_name: str, archive_root: str,
-                          interval: int, copies: int, resume_after: str | None,
-                          cpu_bind: str = "0", mem_bind: str = "0",
-                          metadata_dir: str | None = None,
-                          generate_metadata: bool = True) -> dict[str, str | int]:
+def run_workload(*,
+                 bin_path: str,
+                 workload_name: str,
+                 archive_root: str,
+                 interval: int,
+                 resume_after: str | None,
+                 cpu_bind: str = "0",
+                 mem_bind: str = "0",
+                 metadata_dir: str | None = None,
+                 generate_metadata: bool = True) -> dict[str, str | int]:
     layout = build_archive_layout(archive_root)
     ensure_directories(layout.values())
+    load_nemu_paths()
 
     effective_resume_after = resume_after
     preserve_checkpoint_workload = False
     if resume_after == AUTO_RESUME:
         state = detect_auto_resume_state(archive_root, workload_name)
         if state["skip"]:
-            checkpoint_count = count_checkpoints(archive_root, workload_name)
             workload_checkpoint_dir = checkpoint_dir(archive_root, workload_name)
-            print(f"Archive: {os.path.basename(archive_root)}")
-            print(f"Resume after: auto ({state['state']})")
-            print(f"Skipping completed workload: {workload_name}")
-            print(f"Checkpoint count: {checkpoint_count}")
-            print(f"Checkpoint dir: {workload_checkpoint_dir}")
             return {
                 "name": workload_name,
                 "archive_id": os.path.basename(archive_root),
                 "archive_root": archive_root,
-                "checkpoint_count": checkpoint_count,
+                "checkpoint_count": count_checkpoints(archive_root, workload_name),
                 "checkpoint_dir": workload_checkpoint_dir,
                 "skipped": 1,
             }
@@ -593,7 +462,6 @@ def run_single_checkpoint(*, bin_path: str, workload_name: str, archive_root: st
         "name": workload_name,
         "archive_id": os.path.basename(archive_root),
         "interval": interval,
-        "copies": copies,
         "resume_after": resume_after,
     }
     request_dir = metadata_dir or layout["metadata"]
@@ -613,46 +481,49 @@ def run_single_checkpoint(*, bin_path: str, workload_name: str, archive_root: st
     validate_resume_artifacts(archive_root, workload_name, effective_resume_after)
     ensure_resume_logs(archive_root, workload_name, effective_resume_after)
 
-    nemu_home = os.environ.get("NEMU_HOME")
-    if not nemu_home:
-        raise EnvironmentError("NEMU_HOME is not set")
-    validate_runtime_tools(nemu_home)
-
-    take_config = TakeCheckpointConfig(start_id="0,0,0",
-                                       times="1,1,1",
-                                       path_env_vars_to_check=["NEMU_HOME"])
-    config = take_config.get_config()
-    config["utils"]["interval"] = str(interval)
-
-    root = generate_command(workload_folder=layout["gcpt_bins"],
-                            workload=workload_name,
-                            buffer=archive_root,
-                            bin_suffix="",
-                            emu="NEMU",
-                            log_folder=layout["logs"],
-                            cpu_bind=cpu_bind,
-                            mem_bind=mem_bind,
-                            copies=str(copies),
-                            config=config,
-                            resume_after=effective_resume_after,
-                            all_in_one_workload=True)
-    if root is None:
-        raise RuntimeError("failed to generate execution tree")
-
-    print(f"Archive: {os.path.basename(archive_root)}")
-    print(f"Input bin copied to: {copied_bin}")
-    print(f"Metadata: {metadata_path}")
-    print(f"Interval: {interval}")
-    print(f"Copies: {copies}")
-    print(f"CPU bind: {cpu_bind}")
-    print(f"MEM bind: {mem_bind}")
-    print(f"Resume after: {effective_resume_after or 'fresh'}")
-
     try:
-        level_first_exec(root)
+        if effective_resume_after is None:
+            profiling_rc = run_profiling_step(
+                archive_root=archive_root,
+                workload=workload_name,
+                workload_bin=copied_bin,
+                interval=interval,
+                cpu_bind=cpu_bind,
+                mem_bind=mem_bind,
+            )
+            if profiling_rc != 0:
+                print(f"Warning: profiling exited with code {profiling_rc} for {workload_name}")
+            run_cluster_step(
+                archive_root=archive_root,
+                workload=workload_name,
+                cpu_bind=cpu_bind,
+                mem_bind=mem_bind,
+            )
+        elif effective_resume_after == "profiling":
+            run_cluster_step(
+                archive_root=archive_root,
+                workload=workload_name,
+                cpu_bind=cpu_bind,
+                mem_bind=mem_bind,
+            )
+        elif effective_resume_after != "cluster":
+            raise ValueError(f"unsupported resume stage: {effective_resume_after}")
+
+        checkpoint_rc = run_checkpoint_step(
+            archive_root=archive_root,
+            workload=workload_name,
+            workload_bin=copied_bin,
+            interval=interval,
+            cpu_bind=cpu_bind,
+            mem_bind=mem_bind,
+        )
+        if checkpoint_rc != 0:
+            print(
+                f"Warning: checkpoint step exited with code {checkpoint_rc} for {workload_name}")
     finally:
         if resume_after == AUTO_RESUME:
             restore_auto_resume_artifacts(archive_root, workload_name)
+
     validate_outputs(archive_root, workload_name)
     if generate_metadata:
         clear_aggregate_metadata(archive_root)
@@ -663,18 +534,40 @@ def run_single_checkpoint(*, bin_path: str, workload_name: str, archive_root: st
             ids=[0, 0, 0],
         )
 
-    checkpoint_count = count_checkpoints(archive_root, workload_name)
     workload_checkpoint_dir = checkpoint_dir(archive_root, workload_name)
-    print(f"Checkpoint count: {checkpoint_count}")
-    print(f"Checkpoint dir: {workload_checkpoint_dir}")
-
     return {
         "name": workload_name,
         "archive_id": os.path.basename(archive_root),
         "archive_root": archive_root,
-        "checkpoint_count": checkpoint_count,
+        "checkpoint_count": count_checkpoints(archive_root, workload_name),
         "checkpoint_dir": workload_checkpoint_dir,
+        "metadata": metadata_path,
     }
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=
+        "Run profiling, cluster, checkpoint, and metadata from one bin or a directory of bins",
+    )
+    parser.add_argument("--input-path",
+                        required=True,
+                        help="Path to a GCPT-bootable bin file or a directory of bin files")
+    parser.add_argument("--name",
+                        help="Optional workload name override used only with a single input file")
+    parser.add_argument("--archive-id", help="Existing or new archive id")
+    parser.add_argument("--interval",
+                        type=int,
+                        default=20_000_000,
+                        help="Checkpoint interval")
+    parser.add_argument("--max-workers",
+                        type=int,
+                        default=3,
+                        help="Maximum parallel workloads used in directory mode")
+    parser.add_argument("--resume-after",
+                        choices=["profiling", "cluster", AUTO_RESUME],
+                        help="Resume from a later stage")
+    return parser
 
 
 def main() -> int:
@@ -683,14 +576,12 @@ def main() -> int:
 
     input_mode, entries, common_suffix = load_input_entries(args.input_path,
                                                             args.name)
-
     for entry in entries:
         validate_input_args(
             build_single_run_args(input_path=entry["bin"],
                                   workload_name=entry["name"],
                                   archive_id=args.archive_id,
                                   interval=args.interval,
-                                  copies=args.copies,
                                   max_workers=args.max_workers,
                                   resume_after=args.resume_after))
 
@@ -702,21 +593,21 @@ def main() -> int:
         write_request_metadata(
             os.path.join(archive_root, "metadata"),
             {
-                "mode": "single",
+                "mode": "file",
                 "input_path": os.path.realpath(args.input_path),
                 "name": entries[0]["name"],
                 "archive_id": archive_id,
                 "interval": args.interval,
-                "copies": args.copies,
                 "resume_after": args.resume_after,
             },
         )
-        run_single_checkpoint(bin_path=entries[0]["bin"],
-                              workload_name=entries[0]["name"],
-                              archive_root=archive_root,
-                              interval=args.interval,
-                              copies=args.copies,
-                              resume_after=args.resume_after)
+        run_workload(
+            bin_path=entries[0]["bin"],
+            workload_name=entries[0]["name"],
+            archive_root=archive_root,
+            interval=args.interval,
+            resume_after=args.resume_after,
+        )
         return 0
 
     archive_id = args.archive_id or generate_archive_id("directory")
@@ -731,7 +622,6 @@ def main() -> int:
             "input_path": os.path.realpath(args.input_path),
             "archive_id": archive_id,
             "interval": args.interval,
-            "copies": args.copies,
             "resume_after": args.resume_after,
             "max_workers": args.max_workers,
             "common_suffix": common_suffix or "",
@@ -750,6 +640,7 @@ def main() -> int:
     failures = []
     requests_dir = os.path.join(layout["metadata"], "requests")
     os.makedirs(requests_dir, exist_ok=True)
+
     with concurrent.futures.ThreadPoolExecutor(
             max_workers=args.max_workers) as executor:
         future_to_entry = {}
@@ -758,12 +649,11 @@ def main() -> int:
             print(
                 f"=== [{index + 1}/{len(entries)}] Checkpointing {entry['name']} from {entry['bin']} (cpu={cpu_bind}, mem={mem_bind}) ==="
             )
-            future = executor.submit(run_single_checkpoint,
+            future = executor.submit(run_workload,
                                      bin_path=entry["bin"],
                                      workload_name=entry["name"],
                                      archive_root=archive_root,
                                      interval=args.interval,
-                                     copies=args.copies,
                                      resume_after=args.resume_after,
                                      cpu_bind=cpu_bind,
                                      mem_bind=mem_bind,

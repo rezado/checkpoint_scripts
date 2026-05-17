@@ -14,7 +14,7 @@ class CheckpointWorkflowTests(unittest.TestCase):
 
         dispatch = workflow["on"]["workflow_dispatch"]
         inputs = dispatch["inputs"]
-        job = workflow["jobs"]["run-single-bin-checkpoint"]
+        job = workflow["jobs"]["run-checkpoint"]
         checkout = job["steps"][0]
         self.assertEqual(job["runs-on"], "self-hosted")
         self.assertIn("input_path", inputs)
@@ -29,7 +29,7 @@ class CheckpointWorkflowTests(unittest.TestCase):
         self.assertEqual(inputs["interval"]["default"], "20000000")
         self.assertEqual(inputs["max_workers"]["default"], "3")
         self.assertEqual(inputs["resume_after"]["default"], "")
-        self.assertEqual(job["timeout-minutes"], "2880")
+        self.assertEqual(job["timeout-minutes"], "20160")
         self.assertEqual(checkout["with"]["clean"], "false")
 
         run_script = job["steps"][-1]["run"]
@@ -49,6 +49,7 @@ class CheckpointWorkflowTests(unittest.TestCase):
         self.assertIn('--resume-after "$RESUME_AFTER"', run_script)
         self.assertIn('--archive-id "$ARCHIVE_ID_INPUT"', run_script)
         self.assertIn('--max-workers "$MAX_WORKERS"', run_script)
+        self.assertIn("python3 run_checkpoint.py", run_script)
         self.assertIn("- input_path: \\`$INPUT_PATH\\`", run_script)
         self.assertIn("- input_kind: \\`$INPUT_KIND\\`", run_script)
         self.assertIn("- archive_id: \\`${ARCHIVE_ID_INPUT:-auto}\\`", run_script)

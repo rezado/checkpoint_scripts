@@ -1,246 +1,146 @@
-## GitHub Action 快速使用
+# checkpoint_scripts
 
-如果你只是想直接跑 checkpoint，而不是自己在本地拼装命令，优先使用 GitHub Action。
+这个仓库现在只保留一件事：从已经可启动的 GCPT bin 生成 checkpoint。
 
-- 进入仓库的 `Actions` 页面
-- 选择 `Checkpoint` workflow
-- 点击 `Run workflow`
+输入可以是：
+- 单个 bin 文件
+- 一个包含多个 bin 文件的目录
 
-### 常用场景
+多 bin 模式下，所有 workload 会汇总到同一个 archive 里，目录名默认是：
+- `profiling`
+- `cluster`
+- `checkpoint`
+- `logs`
+- `metadata`
+- `json`
+- `gcpt_bins`
 
-- 单 bin 模式
-    - 填写 `input_path`
-    - 如果需要自定义 workload 名，再额外填写 `name`
-- 多 bin 模式
-    - 填写一个包含多个 bin 的目录到 `input_path`
+## 流程拆分
 
-### 关键输入
+`checkpoint_scripts/` 目录下保留的脚本按步骤组织：
 
+- `run_checkpoint.py`
+  总入口；负责识别输入、批量调度、resume、汇总 metadata
+- `step_profiling.py`
+  生成 BBV
+- `step_cluster.py`
+  运行 SimPoint 聚类
+- `step_checkpoint.py`
+  根据聚类点生成 checkpoint，并校验产物
+- `step_metadata.py`
+  生成 `json/*.json` 和 `checkpoint/checkpoint.lst`
+- `checkpoint_layout.py`
+  统一管理 archive/stage 路径
+- `checkpoint_env.py`
+  校验 `NEMU_HOME` 和运行时工具
+
+## GitHub Action
+
+优先推荐直接使用仓库里的 `Checkpoint` workflow。
+
+常用输入：
+- `input_path`
+  必填；可以是单个 bin，也可以是目录
+- `name`
+  仅单文件模式可用；覆盖 workload 名
+- `archive_id`
+  可选；指定输出目录名，或在 resume 时指向已有 archive
 - `interval`
-    - checkpoint 间隔，默认 `20000000`
+  checkpoint 间隔，默认 `20000000`
 - `max_workers`
-    - 批量模式的最大并行 workload 数，默认 `3`
-- `nemu_home`
-    - 可选；填写后会覆盖默认 `NEMU_HOME`
+  目录模式下的最大并行 workload 数，默认 `3`
+- `resume_after`
+  可选；`profiling`、`cluster`、`auto`
 - `rebuild_nemu`
-    - 设为 `true` 时，只重编译 NEMU、`gcpt_restore` 和 `simpoint`
-- `nemu_defconfig`
-    - 可选；默认 `riscv64-xs-cpt_defconfig`
+  可选；为 `true` 时先重编译 NEMU、`gcpt_restore` 和 `simpoint`
 
-### 单 bin 示例
+workflow timeout 目前是 14 天。
 
-- `input_path`: `/abs/path/to/my_bzip2.fw_payload.bin`
-- `name`: `my_bzip2`
-- `interval`: `20000000`
-- `nemu_home`: `/nfs/home/wujiabin/work/xs-env/NEMU`
+## 本地使用
 
-### 多 bin 示例
+先准备环境：
 
-- `input_path`: `/nfs-nvme/home/share/debug/xuyinan/temp/20260509-ckpt/spec2006_new/bin`
-- `interval`: `20000000`
-- `max_workers`: `3`
-- `nemu_home`: `/nfs/home/wujiabin/work/xs-env/NEMU`
-
-### 说明
-
-- `input_path` 必填，既可以是单个 bin 文件，也可以是一个目录
-- 目录模式下会自动扫描其中的 bin 文件
-- 目录模式下所有 workload 会汇总到同一个 archive 中
-- 目录模式下 workload 名会通过所有 bin 文件名的公共后缀自动推导，例如 `.bin` 或 `.fw_payload.bin`
-- 默认 stage 目录名为 `profiling`、`cluster`、`checkpoint`
-- postprocess 结果会放到 `json/` 目录下，其中包括每个 workload 的单独 JSON，以及 `checkpoints_all.json`、`checkpoints_cov0.3.json`
-
-## 环境准备
-
-### 可以访问公共服务器
-- 请执行
 ```bash
 source /nfs/home/share/workload_env/env.sh
 ```
 
-### 无法访问公共服务器
-- 预先准备好 riscv64 工具链，可能用到的 prefix 有`riscv64-linux-gnu-`，`riscv64-unknown-linux-gnu-`，`riscv64-unknown-elf-`，需要的 gcc 版本最低应该是 14.0.0
+至少要保证：
+- `NEMU_HOME` 已设置
+- `$NEMU_HOME/build/riscv64-nemu-interpreter` 已存在
+- `$NEMU_HOME/resource/simpoint/simpoint_repo/bin/simpoint` 已存在
 
-- 克隆或下载 OpenSBI，Linux，nemu_board，NEMU，QEMU，LibCheckpoint，LibCheckpointAlpha，riscv-rootfs
-    - https://github.com/riscv-software-src/opensbi.git
-    - https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.10.3.tar.xz
-    - https://github.com/OpenXiangShan/nemu_board.git
-    - https://github.com/OpenXiangShan/NEMU.git
-    - https://github.com/OpenXiangShan/qemu.git checkpoint分支
-    - https://github.com/OpenXiangShan/LibCheckpoint.git
-    - https://github.com/OpenXiangShan/LibCheckpointAlpha.git
-    - https://github.com/OpenXiangShan/riscv-rootfs.git
+单 bin：
 
-- 准备 Linux kernel
-    - 解压缩内核 `tar -xf linux-6.10.3.tar.xz`
-    - 复制配置文件 `cp /path/to/nemu_board/config/xiangshan_defconfig /path/to/linux/arch/riscv/config/`
-    - 在 Linux kernel 目录下调整配置文件并保存为默认配置文件 `make menuconfig; make savedefconfig; mv defconfig arch/riscv/config/xiangshan_defconfig`
-- 准备设备树
-    - 构建单核多核设备树 `cd /path/to/nemu_board/dts && ./build_dual_core_for_qemu.sh && ./build_single_core_for_nemu.sh`
-
-- 构建 NEMU
-    - 进入 NEMU 目录
-    - 拉取 submodule `git submodule update --init`
-    - 使用 `riscv64-xs-cpt_defconfig` 配置 NEMU `make riscv64-xs-cpt_defconfig`
-    - 构建 NEMU `make -j`
-    - 构建 simpoint `cd /path/to/NEMU/resource/simpoint/simpoint_repo && make -j`
-    - 如果只想重编译 NEMU，可以直接在仓库根目录运行
 ```bash
-INIT_NEMU=1 NEMU_HOME=/path/to/NEMU NEMU_DEFCONFIG=riscv64-xs-cpt_defconfig bash build.sh
+python3 checkpoint_scripts/run_checkpoint.py \
+  --input-path /path/to/demo.fw_payload.bin \
+  --name demo \
+  --archive-id demo-checkpoint
 ```
-        - `NEMU_HOME` 可选；不传时使用 `prepare_env.sh` 默认值
-        - `NEMU_DEFCONFIG` 可选；不传时默认 `riscv64-xs-cpt_defconfig`
-        - 这条路径只会重编译 NEMU、`gcpt_restore` 和 `simpoint`，不会重编译 Linux、QEMU、OpenSBI 或其他依赖
 
-- 构建 QEMU
-    - 进入 QEMU 目录
-    - 配置 QEMU `mkdir build && cd build && ../configure --target-list=riscv64-softmmu --enable-debug --enable-zstd --enable-plugins`
-    - 构建 QEMU `make -j`
+多 bin：
 
-- 准备 riscv-rootfs
-    - 进入 riscv-rootfs 目录
-    - 构建 riscv-rootfs app `make install`
-    - 进入 riscv-rootfs/rootfsimg 目录，修改 `inittab-spec`
-    ```
-    -/dev/console::sysinit:-/bin/sh /spec/run.sh
-    +/dev/console::sysinit:-/bin/sh /spec0/run.sh
-    ```
-
-
-- 准备运行时所需文件的目录
-    - 提前运行一遍 SPEC2006 和 SPEC2017 （根据自己需要可以仅运行其中一个）
-    - 创建目录 `mkdir cpu2006_run_dir` 和 `mkdir cpu2017_run_dir`
-    - 将运行结果所在的目录拷贝到`cpu2006_run_dir`中，例如 `cp cpu2006v99/benchspec/CPU2006/410.perlbench/run/run_base_ref_amd64-m64-gcc42-05.0001 cpu2006_run_dir/perlbench -r`
-    - 对所有子项都这样操作，然后设置环境变量 `export CPU2006_RUN_DIR=/path/to/cpu2006_run_dir` 和 `export CPU2017_RUN_DIR=/path/to/cpu2017_run_dir`
-
-- 导出环境变量
 ```bash
-export ARCH=riscv
-export LINUX_HOME=/path/to/linux
-export OPENSBI_HOME=/path/to/opensbi
-export XIANGSHAN_FDT=/path/to/nemu_board/dts/build/xiangshan_dualcore.dtb
-export RISCV=/path/to/riscv-toolchain
-export RISCV_ROOTFS_HOME=/path/to/riscv-rootfs
-export CPU2006_RUN_DIR=/path/to/cpu2006_run_dir
-export CPU2017_RUN_DIR=/path/to/cpu2017_run_dir
-export CROSS_COMPILE=/path/to/riscv-toolchains/bin/riscv64-unknown-linux-gnu-
-export GCPT_HOME=/path/to/LibCheckpoint
-export NEMU_HOME=/path/to/NEMU
-export QEMU_HOME=/path/to/qemu
-```
-
-### 单核检查点
-
-- 修改环境变量
-    - 公共服务器
-        - `export XIANGSHAN_FDT=/nfs/home/share/workload_env/workload_build_env/dts/build/xiangshan.dtb`
-        - `export GCPT_HOME=/nfs/home/share/workload_env/LibCheckpointAlpha`
-    - 私有环境
-        - `export XIANGSHAN_FDT=/path/to/nemu_board/dts/build/xiangshan.dtb`
-        - `export GCPT_HOME=/path/to/LibCheckpointAlpha`
-- 修改下述配置文件
-    - 修改字段 `copies` 为 1
-
-### 多核检查点
-- 在导入环境变量之后仅需按照下述说明修改配置文件，并保证 `copies` 字段大于 1 即可（目前的环境下请保证该字段小于 4 ）
-
-### 使用说明
-- 克隆这个仓库[https://github.com/xyyy1420/checkpoint_scripts.git](https://github.com/xyyy1420/checkpoint_scripts.git) 到任意目录
-- 进入 checkpoint_scripts 目录
-- 参数说明
-
-```
-usage: generate_checkpoint.py [--config]
-
-Auto profiling and checkpointing
-
-optional arguments:
-  --config              指定配置文件
-```
-
-- 配置文件说明
-
-```yaml
-base_config:
-  message: "NULL" # 通常为空
-  spec_app_list: null # 与下面的 spec_apps 选项作用一致，这里填写一个 list 文件的路径，list 文件中每行一个子项
-  spec_apps: "gcc_scilab" # 这里填写用英文逗号分割的子项
-  elf_folder: "./jemalloc_elf" # 使用的 elf 的路径
-  times: "1,1,1" # profiling cluster checkpoint 各运行的次数
-  start_id: "0,0,0" # profiling cluster checkpoint 各运行的结果保存路径的起始 id
-  emulator: "QEMU" # 用于 profiling 和 checkpoint 的模拟器，可选 "QEMU" 或者 "NEMU"
-  build_bbl_only: false # 设置为 true 时编译完所有的 workload 后结束运行
-  max_threads: 70 # profiling cluster checkpoint 时可以使用的最大线程数
-  CPU2017: false # 目标 elf 是否是 speccpu2017
-  generate_rootfs_script_only: false # 是否仅生成 rootfs 脚本之后停止
-  copies: 2 # profiling 和 checkpoint 并行执行多少个 spec 子项，当 copies=1 时 kernel 将放置在 0x80200000，否则 kernel 将放置在 0x80800000
-  archive_id: null # 如果设置了 archive_id 将跳过 workload 构建前的阶段，直接使用该 id 下已有的 workload
-  redirect_output: false # 是否重定向子项的输出
-  cpu_bind: 0 # useless
-  mem_bind: 0 # useless
-  bootloader: "opensbi" # 使用 opensbi 还是 riscv-pk 作为启动器，riscv-pk 的流程目前维护不佳
-  all_in_one_workload: true # 如果使用 all in one workload，将会使用 gcpt 链接 workload，生成的 workload 可以直接被启动，在使用 QEMU 作为模拟器时，必须使用 all in one workload
-  boot_for_test: true # 设置为 true 时将在构建完 workload 使用上述配置文件中指定的模拟器运行 1min
-archive_id_config: # 配置生成的 archive id，仅影响结果放置在哪里
-  gcc_version: "gcc12.2.0"
-  riscv_ext: "rv64gcb"
-  base_or_fixed: "base"
-  special_flag: "intFppOff_for_qemu_dual_core"
-  group: "archgroup"
-```
-
-- 一键checkpoint
-```
-python3 generate_checkpoint.py --config config.yaml
-```
-- 单 bin 一键 checkpoint
-    - 适用场景：已经有一个可直接启动的 GCPT bin，或者一个存放多个 bin 的目录，希望直接执行完整的 `profiling -> cluster -> checkpoint` 流程
-    - 这条路径固定使用 NEMU，不会重新编译 Linux、rootfs、OpenSBI 或 workload
-    - 输入文件必须是可以直接启动的 GCPT bin，而不是普通 ELF 或裸 bin
-    - 运行前至少需要保证 `NEMU_HOME` 已设置，且 `riscv64-nemu-interpreter` 与 `simpoint` 已正确构建
-
-```
-bash checkpoint_scripts/run_single_bin_checkpoint.sh \
-  --input-path /path/to/your.bin \
-  --name your_workload \
-  --archive-id your_archive_id
-```
-
-    - 参数说明
-        - `--input-path`：输入路径，必填；可以是单个 bin 文件，或者是一个包含多个 bin 文件的目录
-        - `--name`：单文件模式下的 workload 名称，可选；不传时会自动由文件名去掉后缀推导
-        - `--archive-id`：输出 archive 名称，可选；不指定时会自动生成
-        - `--interval`：checkpoint 间隔，可选，默认 `20000000`
-        - `--copies`：核数，可选，默认 `1`
-        - `--max-workers`：目录模式下的最大并行 workload 数，可选，默认 `3`
-        - `--resume-after profiling|cluster|auto`：从已有 archive 的中间阶段继续执行，可选；使用时需要配合 `--archive-id`
-            - 目录模式下，推荐直接对整个共享 archive 使用同一个 `--archive-id`
-    - GitHub Action 手动触发
-        - 快速使用见 README 开头的 [GitHub Action 快速使用](#github-action-快速使用)
-        - 如果这里只看输入规则：统一使用 `input_path`；目录模式可额外设置 `max_workers`；`nemu_home` 可覆盖默认 `NEMU_HOME`
-
-    - 示例
-```
-bash checkpoint_scripts/run_single_bin_checkpoint.sh \
-  --input-path /nfs/home/wujiabin/work/checkpoint_scripts/checkpoint_scripts/archive/custom_gcc12.2.0_rv64gcb_base_custom_test_QEMU_testgroup_2026-03-31-17-19/gcpt_bins/my_bzip2 \
-  --name my_bzip2 \
-  --archive-id my-bzip2-run
-```
-
-    - 多 bin 示例
-```
-bash checkpoint_scripts/run_single_bin_checkpoint.sh \
+python3 checkpoint_scripts/run_checkpoint.py \
   --input-path /path/to/bin-directory \
   --interval 20000000 \
   --max-workers 3
 ```
-- 导出 checkpoint list 和权重文件
-    - 修改 dump_result.py 文件中的 spec_list，base_path
-    - 运行该脚本，随后会在 checkpoint 目录下生成 list 文件和 权重文件
 
-- 本脚本目前仅维护使用opensbi的环境
+resume：
 
-- Reference
-    - https://github.com/OpenXiangShan/riscv-rootfs/blob/master/rootfsimg/spec_gen.py
-        - checkpoint_scripts/spec_info/spec06.json 和 checkpoint_scripts/spec_info/spec17.json 是通过该仓库的脚本修改而来
-        - checkpoint_scripts/generate_bbl.py 中的 default_initramfs_file，prepare_rootfs，traverse_path，__generate_initramfs，__generate_run_scripts 都是取自该仓库的脚本
+```bash
+python3 checkpoint_scripts/run_checkpoint.py \
+  --input-path /path/to/bin-directory \
+  --archive-id checkpoint_batch_2026-05-17-12-00-00 \
+  --resume-after auto
+```
+
+## 命名规则
+
+- 单文件模式下，如果不传 `--name`，会从文件名自动去掉已知后缀后得到 workload 名
+- 目录模式下，会根据所有文件名的公共后缀推导 workload 名
+- 当前内置的常见后缀主要是 `.fw_payload.bin` 和 `.bin`
+
+例如：
+- `gcc_166.fw_payload.bin` -> `gcc_166`
+- `astar_biglakes.bin` -> `astar_biglakes`
+
+## 输出结构
+
+以 `archive/checkpoint_batch_2026-05-17-12-00-00/` 为例：
+
+```text
+archive/checkpoint_batch_2026-05-17-12-00-00/
+├── checkpoint/
+├── cluster/
+├── gcpt_bins/
+├── json/
+├── logs/
+├── metadata/
+└── profiling/
+```
+
+说明：
+- `gcpt_bins/`
+  保存输入 bin 的归档副本，方便 resume 和结果复现
+- `metadata/`
+  保存批量请求和每个 workload 的请求记录
+- `json/`
+  保存每个 workload 的 JSON，以及：
+  - `checkpoints_all.json`
+  - `checkpoints_cov0.3.json`
+- `checkpoint/checkpoint.lst`
+  汇总后的 checkpoint list
+
+## 测试
+
+当前测试覆盖的是这条精简后的 checkpoint 生成链：
+
+```bash
+python -m unittest \
+  tests.test_step_metadata \
+  tests.test_run_checkpoint \
+  tests.test_checkpoint_steps \
+  tests.test_checkpoint_workflow
+```

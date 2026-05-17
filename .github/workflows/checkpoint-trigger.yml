@@ -48,7 +48,7 @@ on:
         type: string
 
 jobs:
-  run-single-bin-checkpoint:
+  run-checkpoint:
     runs-on: self-hosted
     timeout-minutes: 20160 # 14 days
     steps:
@@ -171,7 +171,7 @@ jobs:
           echo "INFO: max_workers=$MAX_WORKERS"
           echo "INFO: archive_id=${ARCHIVE_ID_INPUT:-auto}"
 
-          bash run_single_bin_checkpoint.sh \
+          python3 run_checkpoint.py \
             --input-path "$INPUT_PATH" \
             --interval "$INTERVAL" \
             --max-workers "$MAX_WORKERS" \

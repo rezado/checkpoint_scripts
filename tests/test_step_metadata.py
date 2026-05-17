@@ -11,12 +11,12 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 
-class CheckpointPostprocessTests(unittest.TestCase):
-    def test_dump_result_generates_json_directory_and_worklist(self):
+class StepMetadataTests(unittest.TestCase):
+    def test_generate_metadata_creates_json_directory_and_worklist(self):
         try:
-            postprocess = importlib.import_module("checkpoint_postprocess")
+            metadata = importlib.import_module("step_metadata")
         except ModuleNotFoundError as exc:
-            self.fail(f"checkpoint_postprocess module missing: {exc}")
+            self.fail(f"step_metadata module missing: {exc}")
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -41,7 +41,7 @@ class CheckpointPostprocessTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            postprocess.dump_result(str(base), ["demo"], [1, 1, 1], [0, 0, 0])
+            metadata.generate_metadata(str(base), ["demo"], [1, 1, 1], [0, 0, 0])
 
             workload_json_path = base / "json" / "demo.json"
             all_json_path = base / "json" / "checkpoints_all.json"
@@ -66,11 +66,11 @@ class CheckpointPostprocessTests(unittest.TestCase):
 
     def test_generate_result_list_uses_plain_stage_names_for_default_ids(self):
         try:
-            postprocess = importlib.import_module("checkpoint_postprocess")
+            metadata = importlib.import_module("step_metadata")
         except ModuleNotFoundError as exc:
-            self.fail(f"checkpoint_postprocess module missing: {exc}")
+            self.fail(f"step_metadata module missing: {exc}")
 
-        result = postprocess.generate_result_list("/tmp/archive", [1, 1, 2], [0, 0, 0])
+        result = metadata.generate_result_list("/tmp/archive", [1, 1, 2], [0, 0, 0])
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["profiling_log"], "/tmp/archive/logs/profiling")
@@ -79,9 +79,9 @@ class CheckpointPostprocessTests(unittest.TestCase):
 
     def test_profiling_instrs_rejects_empty_profiling_log(self):
         try:
-            postprocess = importlib.import_module("checkpoint_postprocess")
+            metadata = importlib.import_module("step_metadata")
         except ModuleNotFoundError as exc:
-            self.fail(f"checkpoint_postprocess module missing: {exc}")
+            self.fail(f"step_metadata module missing: {exc}")
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -89,7 +89,7 @@ class CheckpointPostprocessTests(unittest.TestCase):
             (base / "demo" / "profiling.out.log").write_text("", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "failed to find instructions"):
-                postprocess.profiling_instrs(str(base), "demo", using_new_script=True)
+                metadata.profiling_instrs(str(base), "demo", using_step_layout=True)
 
 
 if __name__ == "__main__":

@@ -10,12 +10,12 @@ SCRIPT_DIR = REPO_ROOT / "checkpoint_scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import run_single_bin_checkpoint as single_bin
+import run_checkpoint as checkpoint_runner
 
 
-class SingleBinCheckpointTests(unittest.TestCase):
+class RunCheckpointTests(unittest.TestCase):
     def test_build_archive_layout_contains_expected_paths(self):
-        layout = single_bin.build_archive_layout("/tmp/archive/demo")
+        layout = checkpoint_runner.build_archive_layout("/tmp/archive/demo")
         self.assertEqual(layout["gcpt_bins"], "/tmp/archive/demo/gcpt_bins")
         self.assertEqual(layout["logs"], "/tmp/archive/demo/logs")
         self.assertEqual(layout["metadata"], "/tmp/archive/demo/metadata")
@@ -25,14 +25,13 @@ class SingleBinCheckpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             metadata_dir = Path(tmp) / "metadata"
             metadata_dir.mkdir()
-            output = single_bin.write_request_metadata(
+            output = checkpoint_runner.write_request_metadata(
                 metadata_dir=str(metadata_dir),
                 request={
                     "bin": "/tmp/demo.bin",
                     "name": "demo",
                     "archive_id": "archive-demo",
                     "interval": 20000000,
-                    "copies": 1,
                     "resume_after": None,
                 },
             )
@@ -42,12 +41,12 @@ class SingleBinCheckpointTests(unittest.TestCase):
             self.assertIn("interval: 20000000", text)
 
     def test_parse_args_requires_input_path(self):
-        parser = single_bin.build_arg_parser()
+        parser = checkpoint_runner.build_arg_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args([])
 
     def test_parse_args_accepts_max_workers(self):
-        parser = single_bin.build_arg_parser()
+        parser = checkpoint_runner.build_arg_parser()
         args = parser.parse_args(
             ["--input-path", "/tmp/bins", "--max-workers", "3"]
         )
@@ -62,7 +61,9 @@ class SingleBinCheckpointTests(unittest.TestCase):
             alpha_bin.write_text("alpha", encoding="utf-8")
             beta_bin.write_text("beta", encoding="utf-8")
 
-            mode, entries, common_suffix = single_bin.load_input_entries(str(bin_dir))
+            mode, entries, common_suffix = checkpoint_runner.load_input_entries(
+                str(bin_dir)
+            )
 
             self.assertEqual(mode, "directory")
             self.assertEqual(common_suffix, ".fw_payload.bin")
@@ -79,7 +80,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
             input_bin = Path(tmp) / "demo.fw_payload.bin"
             input_bin.write_text("demo", encoding="utf-8")
 
-            mode, entries, common_suffix = single_bin.load_input_entries(
+            mode, entries, common_suffix = checkpoint_runner.load_input_entries(
                 str(input_bin),
                 name_override="custom-demo",
             )
@@ -94,13 +95,12 @@ class SingleBinCheckpointTests(unittest.TestCase):
             input_dir.mkdir()
 
             with self.assertRaisesRegex(ValueError, "--name"):
-                single_bin.validate_input_args(
+                checkpoint_runner.validate_input_args(
                     Namespace(
                         input_path=str(input_dir),
                         name="demo",
                         archive_id=None,
                         interval=20000000,
-                        copies=1,
                         resume_after=None,
                         max_workers=3,
                     )
@@ -112,13 +112,12 @@ class SingleBinCheckpointTests(unittest.TestCase):
             input_bin.write_text("demo", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "archive-id"):
-                single_bin.validate_input_args(
+                checkpoint_runner.validate_input_args(
                     Namespace(
                         input_path=str(input_bin),
                         name=None,
                         archive_id=None,
                         interval=20000000,
-                        copies=1,
                         resume_after="cluster",
                         max_workers=3,
                     )
@@ -130,13 +129,12 @@ class SingleBinCheckpointTests(unittest.TestCase):
             input_bin.write_text("demo", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "max-workers"):
-                single_bin.validate_input_args(
+                checkpoint_runner.validate_input_args(
                     Namespace(
                         input_path=str(input_bin),
                         name=None,
                         archive_id=None,
                         interval=20000000,
-                        copies=1,
                         resume_after=None,
                         max_workers=0,
                     )
@@ -159,9 +157,11 @@ class SingleBinCheckpointTests(unittest.TestCase):
             (archive_root / "cluster" / "demo" / "weights0").write_text(
                 "1.0 0", encoding="utf-8"
             )
-            (workload_checkpoint_dir / "_0_1.0_.zstd").write_text("checkpoint", encoding="utf-8")
+            (workload_checkpoint_dir / "_0_1.0_.zstd").write_text(
+                "checkpoint", encoding="utf-8"
+            )
 
-            single_bin.validate_outputs(str(archive_root), "demo")
+            checkpoint_runner.validate_outputs(str(archive_root), "demo")
 
     def test_validate_outputs_rejects_missing_expected_checkpoint_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -187,13 +187,13 @@ class SingleBinCheckpointTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(FileNotFoundError, "2444"):
-                single_bin.validate_outputs(str(archive_root), "demo")
+                checkpoint_runner.validate_outputs(str(archive_root), "demo")
 
     def test_detect_auto_resume_state_classifies_archive_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             archive_root = Path(tmp) / "archive"
 
-            fresh = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            fresh = checkpoint_runner.detect_auto_resume_state(str(archive_root), "demo")
             self.assertEqual(fresh["state"], "fresh")
             self.assertIsNone(fresh["resume_after"])
 
@@ -201,7 +201,9 @@ class SingleBinCheckpointTests(unittest.TestCase):
             (archive_root / "profiling" / "demo" / "simpoint_bbv.gz").write_text(
                 "bbv", encoding="utf-8"
             )
-            profiling = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            profiling = checkpoint_runner.detect_auto_resume_state(
+                str(archive_root), "demo"
+            )
             self.assertEqual(profiling["state"], "after_profiling")
             self.assertEqual(profiling["resume_after"], "profiling")
 
@@ -214,7 +216,9 @@ class SingleBinCheckpointTests(unittest.TestCase):
             (partial_dir / "_55_0.5_memory_.zstd").write_text(
                 "checkpoint", encoding="utf-8"
             )
-            checkpoint = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            checkpoint = checkpoint_runner.detect_auto_resume_state(
+                str(archive_root), "demo"
+            )
             self.assertEqual(checkpoint["state"], "after_cluster")
             self.assertEqual(checkpoint["resume_after"], "cluster")
             self.assertEqual(checkpoint["missing_points"], ["2444"])
@@ -224,7 +228,9 @@ class SingleBinCheckpointTests(unittest.TestCase):
             (complete_dir / "_2444_0.5_memory_.zstd").write_text(
                 "checkpoint", encoding="utf-8"
             )
-            complete = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            complete = checkpoint_runner.detect_auto_resume_state(
+                str(archive_root), "demo"
+            )
             self.assertEqual(complete["state"], "complete")
             self.assertTrue(complete["skip"])
 
@@ -245,8 +251,8 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 "checkpoint", encoding="utf-8"
             )
 
-            state = single_bin.detect_auto_resume_state(str(archive_root), "demo")
-            resume_after = single_bin.prepare_auto_resume_artifacts(
+            state = checkpoint_runner.detect_auto_resume_state(str(archive_root), "demo")
+            resume_after = checkpoint_runner.prepare_auto_resume_artifacts(
                 str(archive_root), "demo", state
             )
 
@@ -261,14 +267,18 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 "0.75 0\n",
             )
             self.assertEqual(
-                (cluster_dir / "simpoints0.auto-resume-full").read_text(encoding="utf-8"),
+                (cluster_dir / "simpoints0.auto-resume-full").read_text(
+                    encoding="utf-8"
+                ),
                 "55 0\n2444 1\n",
             )
 
-            filtered_state = single_bin.detect_auto_resume_state(str(archive_root), "demo")
+            filtered_state = checkpoint_runner.detect_auto_resume_state(
+                str(archive_root), "demo"
+            )
             self.assertEqual(filtered_state["missing_points"], ["2444"])
 
-            single_bin.restore_auto_resume_artifacts(str(archive_root), "demo")
+            checkpoint_runner.restore_auto_resume_artifacts(str(archive_root), "demo")
             self.assertEqual(
                 (cluster_dir / "simpoints0").read_text(encoding="utf-8"),
                 "55 0\n2444 1\n",
@@ -305,7 +315,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
             )
             (json_dir / "demo.json").write_text("{}", encoding="utf-8")
 
-            single_bin.reset_stage_outputs(str(archive_root), "demo", None)
+            checkpoint_runner.reset_stage_outputs(str(archive_root), "demo", None)
 
             self.assertFalse(profiling_dir.exists())
             self.assertFalse(cluster_dir.exists())
@@ -336,7 +346,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
             ]:
                 path.mkdir(parents=True, exist_ok=True)
 
-            single_bin.reset_stage_outputs(str(archive_root), "demo", "profiling")
+            checkpoint_runner.reset_stage_outputs(str(archive_root), "demo", "profiling")
             self.assertTrue(profiling_dir.exists())
             self.assertTrue(profiling_log_dir.exists())
             self.assertFalse(cluster_dir.exists())
@@ -349,7 +359,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
             cluster_log_dir.mkdir(parents=True, exist_ok=True)
             checkpoint_log_dir.mkdir(parents=True, exist_ok=True)
 
-            single_bin.reset_stage_outputs(str(archive_root), "demo", "cluster")
+            checkpoint_runner.reset_stage_outputs(str(archive_root), "demo", "cluster")
             self.assertTrue(profiling_dir.exists())
             self.assertTrue(cluster_dir.exists())
             self.assertTrue(profiling_log_dir.exists())
@@ -357,7 +367,7 @@ class SingleBinCheckpointTests(unittest.TestCase):
             self.assertFalse(workload_checkpoint_dir.parent.exists())
             self.assertFalse(checkpoint_log_dir.exists())
 
-    def test_main_invokes_checkpoint_postprocess_after_validation(self):
+    def test_main_invokes_workload_runner_for_single_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             input_bin = Path(tmp) / "demo.bin"
             input_bin.write_text("bin", encoding="utf-8")
@@ -368,7 +378,6 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 name="demo",
                 archive_id="demo-archive",
                 interval=20000000,
-                copies=1,
                 resume_after=None,
                 max_workers=3,
             )
@@ -376,22 +385,31 @@ class SingleBinCheckpointTests(unittest.TestCase):
             parser = mock.Mock()
             parser.parse_args.return_value = args
 
-            with mock.patch.object(single_bin, "build_arg_parser", return_value=parser), \
-                 mock.patch.object(single_bin, "validate_input_args"), \
-                 mock.patch.object(single_bin, "load_input_entries", return_value=("file", [{"bin": str(input_bin), "name": "demo"}], None)), \
-                 mock.patch.object(single_bin, "ensure_directories"), \
-                 mock.patch.object(single_bin, "write_request_metadata"), \
-                 mock.patch.object(single_bin, "clear_aggregate_metadata"), \
-                 mock.patch.object(single_bin, "run_single_checkpoint") as run_single:
-                exit_code = single_bin.main()
+            with mock.patch.object(
+                checkpoint_runner, "build_arg_parser", return_value=parser
+            ), mock.patch.object(
+                checkpoint_runner, "validate_input_args"
+            ), mock.patch.object(
+                checkpoint_runner,
+                "load_input_entries",
+                return_value=("file", [{"bin": str(input_bin), "name": "demo"}], None),
+            ), mock.patch.object(
+                checkpoint_runner, "ensure_directories"
+            ), mock.patch.object(
+                checkpoint_runner, "write_request_metadata"
+            ), mock.patch.object(
+                checkpoint_runner, "clear_aggregate_metadata"
+            ), mock.patch.object(
+                checkpoint_runner, "run_workload"
+            ) as run_workload:
+                exit_code = checkpoint_runner.main()
 
             self.assertEqual(exit_code, 0)
-            run_single.assert_called_once_with(
+            run_workload.assert_called_once_with(
                 bin_path=str(input_bin),
                 workload_name="demo",
                 archive_root=expected_archive_root,
                 interval=20000000,
-                copies=1,
                 resume_after=None,
             )
 
@@ -409,7 +427,6 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 name=None,
                 archive_id="shared-archive",
                 interval=20000000,
-                copies=2,
                 resume_after=None,
                 max_workers=3,
             )
@@ -432,19 +449,39 @@ class SingleBinCheckpointTests(unittest.TestCase):
                 "checkpoint_dir": "/tmp/shared/checkpoint/beta",
             }
 
-            with mock.patch.object(single_bin, "build_arg_parser", return_value=parser), \
-                 mock.patch.object(single_bin, "validate_input_args"), \
-                 mock.patch.object(single_bin, "load_input_entries", return_value=("directory", [{"bin": str(alpha_bin), "name": "alpha"}, {"bin": str(beta_bin), "name": "beta"}], ".bin")), \
-                 mock.patch.object(single_bin, "write_request_metadata"), \
-                 mock.patch.object(single_bin, "ensure_directories"), \
-                 mock.patch.object(single_bin, "clear_aggregate_metadata"), \
-                 mock.patch.object(single_bin, "generate_checkpoint_metadata") as generate_metadata, \
-                 mock.patch.object(single_bin, "run_single_checkpoint") as run_single, \
-                 mock.patch.object(single_bin.concurrent.futures, "ThreadPoolExecutor") as pool_cls, \
-                 mock.patch.object(single_bin.concurrent.futures, "as_completed", return_value=[future_alpha, future_beta]):
+            with mock.patch.object(
+                checkpoint_runner, "build_arg_parser", return_value=parser
+            ), mock.patch.object(
+                checkpoint_runner, "validate_input_args"
+            ), mock.patch.object(
+                checkpoint_runner,
+                "load_input_entries",
+                return_value=(
+                    "directory",
+                    [{"bin": str(alpha_bin), "name": "alpha"},
+                     {"bin": str(beta_bin), "name": "beta"}],
+                    ".bin",
+                ),
+            ), mock.patch.object(
+                checkpoint_runner, "write_request_metadata"
+            ), mock.patch.object(
+                checkpoint_runner, "ensure_directories"
+            ), mock.patch.object(
+                checkpoint_runner, "clear_aggregate_metadata"
+            ), mock.patch.object(
+                checkpoint_runner, "generate_checkpoint_metadata"
+            ) as generate_metadata, mock.patch.object(
+                checkpoint_runner, "run_workload"
+            ) as run_workload, mock.patch.object(
+                checkpoint_runner.concurrent.futures, "ThreadPoolExecutor"
+            ) as pool_cls, mock.patch.object(
+                checkpoint_runner.concurrent.futures,
+                "as_completed",
+                return_value=[future_alpha, future_beta],
+            ):
                 pool = pool_cls.return_value.__enter__.return_value
                 pool.submit.side_effect = [future_alpha, future_beta]
-                exit_code = single_bin.main()
+                exit_code = checkpoint_runner.main()
 
             expected_archive_root = str((REPO_ROOT / "archive" / "shared-archive").resolve())
             self.assertEqual(exit_code, 0)
@@ -452,12 +489,11 @@ class SingleBinCheckpointTests(unittest.TestCase):
             pool.submit.assert_has_calls(
                 [
                     mock.call(
-                        run_single,
+                        run_workload,
                         bin_path=str(alpha_bin),
                         workload_name="alpha",
                         archive_root=expected_archive_root,
                         interval=20000000,
-                        copies=2,
                         resume_after=None,
                         cpu_bind="0",
                         mem_bind="0",
@@ -465,12 +501,11 @@ class SingleBinCheckpointTests(unittest.TestCase):
                         generate_metadata=False,
                     ),
                     mock.call(
-                        run_single,
+                        run_workload,
                         bin_path=str(beta_bin),
                         workload_name="beta",
                         archive_root=expected_archive_root,
                         interval=20000000,
-                        copies=2,
                         resume_after=None,
                         cpu_bind="1",
                         mem_bind="1",

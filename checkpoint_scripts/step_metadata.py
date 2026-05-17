@@ -1,9 +1,11 @@
+import argparse
 import json
 import os
 import re
 from itertools import product
 from pathlib import Path
 
+from checkpoint_layout import checkpoint_list_path
 from checkpoint_layout import checkpoint_stage_name
 from checkpoint_layout import cluster_stage_name
 from checkpoint_layout import json_output_dir
@@ -13,11 +15,11 @@ from checkpoint_layout import profiling_stage_name
 INSTRUCTION_REGEX = re.compile(r".*total guest instructions = (.*)\x1b.*")
 
 
-def profiling_instrs(profiling_log, spec_app, using_new_script=False):
+def profiling_instrs(profiling_log, spec_app, using_step_layout=False):
     new_path = os.path.join(profiling_log, spec_app, "profiling.out.log")
     old_path = os.path.join(profiling_log, f"{spec_app}-out.log")
 
-    if using_new_script:
+    if using_step_layout:
         path = new_path
         if not os.path.exists(new_path):
             raise FileNotFoundError(new_path)
@@ -28,8 +30,8 @@ def profiling_instrs(profiling_log, spec_app, using_new_script=False):
     else:
         raise FileNotFoundError(f"missing profiling log: {old_path} or {new_path}")
 
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
             if "total guest instructions" not in line:
                 continue
             match = INSTRUCTION_REGEX.findall(line)
@@ -46,13 +48,13 @@ def cluster_weight(cluster_path, spec_app):
     weights_path = Path(cluster_path) / spec_app / "weights0"
     simpoints_path = Path(cluster_path) / spec_app / "simpoints0"
 
-    with weights_path.open("r", encoding="utf-8") as f:
-        for line in f:
+    with weights_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
             weight, cluster_id = line.split()
             weights[cluster_id] = weight
 
-    with simpoints_path.open("r", encoding="utf-8") as f:
-        for line in f:
+    with simpoints_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
             point, cluster_id = line.split()
             if float(weights[cluster_id]) > 1e-4:
                 points[point] = weights[cluster_id]
@@ -98,7 +100,8 @@ def per_checkpoint_generate_json(profiling_log, cluster_path, app_list, target_d
     target_root.mkdir(parents=True, exist_ok=True)
 
     for spec in app_list:
-        workload_metadata = build_workload_metadata(profiling_log, cluster_path, spec)
+        workload_metadata = build_workload_metadata(profiling_log, cluster_path,
+                                                    spec)
         result[spec] = workload_metadata
         write_json_file(target_root / f"{spec}.json", {spec: workload_metadata})
 
@@ -117,21 +120,23 @@ def per_checkpoint_generate_worklist(cpt_path, target_path, json_result):
         target.write_text("", encoding="utf-8")
         return
 
-    with target.open("w", encoding="utf-8") as f:
-        for workload_dir in sorted(entry for entry in checkpoint_root.iterdir() if entry.is_dir()):
-            for checkpoint_dir in sorted(entry for entry in workload_dir.iterdir() if entry.is_dir()):
+    with target.open("w", encoding="utf-8") as handle:
+        for workload_dir in sorted(entry for entry in checkpoint_root.iterdir()
+                                   if entry.is_dir()):
+            for checkpoint_dir in sorted(entry
+                                         for entry in workload_dir.iterdir()
+                                         if entry.is_dir()):
                 workload = workload_dir.name
                 point = checkpoint_dir.name
                 if point not in json_result[workload]["points"]:
                     continue
                 rel_path = checkpoint_dir.relative_to(checkpoint_root).as_posix()
                 name = f"{workload}_{point}"
-                print(f"{name} {rel_path} 0 0 20 20", file=f)
+                print(f"{name} {rel_path} 0 0 20 20", file=handle)
 
 
 def generate_result_list(base_path, times, ids):
     result_list = []
-
     for profiling_id, cluster_id, checkpoint_id in product(
             range(ids[0], times[0]),
             range(ids[1], times[1]),
@@ -141,27 +146,29 @@ def generate_result_list(base_path, times, ids):
         profiling = profiling_stage_name(profiling_id)
         checkpoint = checkpoint_stage_name(profiling_id, cluster_id,
                                            checkpoint_id)
-        result_list.append(
-            {
-                "cl_res": os.path.join(base_path, cluster),
-                "profiling_log": os.path.join(base_path, "logs", profiling),
-                "checkpoint_path": os.path.join(base_path, checkpoint),
-                "json_dir": json_output_dir(base_path, checkpoint),
-                "list_path": os.path.join(base_path, checkpoint, "checkpoint.lst"),
-            }
-        )
-
+        result_list.append({
+            "cluster_path":
+            os.path.join(base_path, cluster),
+            "profiling_log":
+            os.path.join(base_path, "logs", profiling),
+            "checkpoint_path":
+            os.path.join(base_path, checkpoint),
+            "json_dir":
+            json_output_dir(base_path, checkpoint),
+            "list_path":
+            checkpoint_list_path(base_path, profiling_id, cluster_id,
+                                 checkpoint_id),
+        })
     return result_list
 
 
-def dump_result(base_path, spec_app_list, times, ids):
+def generate_metadata(base_path, workloads, times, ids):
     result_list = generate_result_list(base_path, times, ids)
-
     for result in result_list:
         json_result = per_checkpoint_generate_json(
             result["profiling_log"],
-            result["cl_res"],
-            spec_app_list,
+            result["cluster_path"],
+            workloads,
             result["json_dir"],
         )
         per_checkpoint_generate_worklist(
@@ -172,9 +179,45 @@ def dump_result(base_path, spec_app_list, times, ids):
 
 
 def generate_checkpoint_metadata(archive_root, workloads, times, ids):
-    dump_result(
+    generate_metadata(
         base_path=archive_root,
-        spec_app_list=sorted(set(workloads)),
+        workloads=sorted(set(workloads)),
         times=times,
         ids=ids,
     )
+
+
+def parse_csv_ints(value):
+    return [int(item) for item in value.split(",")]
+
+
+def build_arg_parser():
+    parser = argparse.ArgumentParser(
+        description="Generate checkpoint metadata and worklists",
+    )
+    parser.add_argument("--base-path", required=True, help="Checkpoint archive root")
+    parser.add_argument("--workloads",
+                        required=True,
+                        help="Comma-separated workload names")
+    parser.add_argument("--times",
+                        default="1,1,1",
+                        help="Comma-separated profiling,cluster,checkpoint counts")
+    parser.add_argument("--ids",
+                        default="0,0,0",
+                        help="Comma-separated profiling,cluster,checkpoint start ids")
+    return parser
+
+
+def main():
+    args = build_arg_parser().parse_args()
+    workloads = [item for item in args.workloads.split(",") if item]
+    generate_metadata(
+        base_path=args.base_path,
+        workloads=workloads,
+        times=parse_csv_ints(args.times),
+        ids=parse_csv_ints(args.ids),
+    )
+
+
+if __name__ == "__main__":
+    main()
