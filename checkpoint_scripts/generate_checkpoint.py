@@ -22,6 +22,21 @@ class NemuPaths:
     simpoint: str
 
 
+def safe_name(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in value)
+
+
+def resolve_output_base_dir() -> str:
+    override = os.environ.get("CHECKPOINT_OUTPUT_BASE")
+    if override:
+        return os.path.realpath(override)
+    return os.path.realpath("archive")
+
+
+def build_archive_root(archive_id: str) -> str:
+    return os.path.realpath(os.path.join(resolve_output_base_dir(), archive_id))
+
+
 def require_env_path(env_var: str) -> str:
     value = os.environ.get(env_var)
     if not value:
@@ -191,15 +206,22 @@ def ensure_directories(paths) -> None:
         os.makedirs(path, exist_ok=True)
 
 
-def safe_name(value: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in value)
+def derive_archive_label(input_path: str | None) -> str:
+    if not input_path:
+        return "bins"
+    label = os.path.basename(os.path.normpath(input_path))
+    return safe_name(label) or "bins"
 
 
-def generate_archive_id(mode: str, workload: str | None = None) -> str:
+def generate_archive_id(mode: str,
+                        workload: str | None = None,
+                        input_path: str | None = None) -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     if mode == "file":
-        return f"checkpoint_{safe_name(workload or 'workload')}_{timestamp}"
-    return f"checkpoint_batch_{timestamp}"
+        return f"{timestamp}_{safe_name(workload or 'workload')}"
+    if mode == "directory":
+        return f"{timestamp}_{derive_archive_label(input_path)}"
+    raise ValueError(f"unsupported archive mode: {mode}")
 
 
 def write_request_metadata(metadata_dir: str,
@@ -739,8 +761,9 @@ def main() -> int:
                                   resume_after=args.resume_after))
 
     if input_mode == "file":
-        archive_id = args.archive_id or generate_archive_id("file", entries[0]["name"])
-        archive_root = os.path.realpath(os.path.join("archive", archive_id))
+        archive_id = args.archive_id or generate_archive_id("file",
+                                                            entries[0]["name"])
+        archive_root = build_archive_root(archive_id)
         ensure_directories(build_archive_layout(archive_root).values())
         clear_aggregate_metadata(archive_root)
         write_request_metadata(
@@ -754,6 +777,8 @@ def main() -> int:
                 "resume_after": args.resume_after,
             },
         )
+        print(f"Archive: {archive_id}")
+        print(f"Archive root: {archive_root}")
         run_workload(
             bin_path=entries[0]["bin"],
             workload_name=entries[0]["name"],
@@ -763,8 +788,9 @@ def main() -> int:
         )
         return 0
 
-    archive_id = args.archive_id or generate_archive_id("directory")
-    archive_root = os.path.realpath(os.path.join("archive", archive_id))
+    archive_id = args.archive_id or generate_archive_id("directory",
+                                                        input_path=args.input_path)
+    archive_root = build_archive_root(archive_id)
     layout = build_archive_layout(archive_root)
     ensure_directories(layout.values())
     clear_aggregate_metadata(archive_root)
@@ -785,6 +811,7 @@ def main() -> int:
 
     print(f"Batch size: {len(entries)}")
     print(f"Archive: {archive_id}")
+    print(f"Archive root: {archive_root}")
     print(f"Max workers: {args.max_workers}")
     if common_suffix:
         print(f"Derived common suffix: {common_suffix}")

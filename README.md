@@ -42,6 +42,8 @@
   仅单文件模式可用；覆盖 workload 名
 - `archive_id`
   可选；指定输出目录名，或在 resume 时指向已有 archive
+- `output_base`
+  仅 GitHub Action 可用；指定 CI 输出根目录，默认是 `/nfs/home/share/<runner-username>/checkpoint-trigger`
 - `interval`
   checkpoint 间隔，默认 `20000000`
 - `max_workers`
@@ -89,7 +91,7 @@ resume：
 ```bash
 python3 checkpoint_scripts/generate_checkpoint.py \
   --input-path /path/to/bin-directory \
-  --archive-id checkpoint_batch_2026-05-17-12-00-00 \
+  --archive-id 2026-05-17-12-00-00_bin-directory \
   --resume-after auto
 ```
 
@@ -97,6 +99,8 @@ python3 checkpoint_scripts/generate_checkpoint.py \
 
 - 单文件模式下，如果不传 `--name`，会从文件名自动去掉已知后缀后得到 workload 名
 - 目录模式下，会根据所有文件名的公共后缀推导 workload 名
+- 单文件模式默认 archive 名是 `<timestamp>_<workload>`
+- 目录模式默认 archive 名是 `<timestamp>_<input-directory>`
 - 当前内置的常见后缀主要是 `.fw_payload.bin` 和 `.bin`
 
 例如：
@@ -105,10 +109,16 @@ python3 checkpoint_scripts/generate_checkpoint.py \
 
 ## 输出结构
 
-以 `archive/checkpoint_batch_2026-05-17-12-00-00/` 为例：
+本地直接运行 `generate_checkpoint.py` 时，默认输出根目录是仓库内的 `archive/`。
+
+GitHub Action 默认输出根目录是 `/nfs/home/share/<runner-username>/checkpoint-trigger/`。
+
+如果 workflow 里显式传了 `output_base`，则会改为写到该目录下。
+
+以 `/nfs/home/share/alice/checkpoint-trigger/2026-05-17-12-00-00_spec-bins/` 为例：
 
 ```text
-archive/checkpoint_batch_2026-05-17-12-00-00/
+/nfs/home/share/alice/checkpoint-trigger/2026-05-17-12-00-00_spec-bins/
 ├── checkpoint/
 ├── cluster/
 ├── gcpt_bins/

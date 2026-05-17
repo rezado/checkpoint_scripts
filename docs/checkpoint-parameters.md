@@ -34,8 +34,15 @@
 - 如果配合 `--resume-after` 使用，则必须提供
 
 默认命名：
-- 单文件模式：`checkpoint_<workload>_<timestamp>`
-- 目录模式：`checkpoint_batch_<timestamp>`
+- 单文件模式：`<timestamp>_<workload>`
+- 目录模式：`<timestamp>_<input-directory>`
+
+### `output_base`
+
+- 仅 GitHub Action 输入提供
+- 可选
+- 指定 CI 输出根目录
+- 默认值是 `/nfs/home/share/<runner-username>/checkpoint-trigger`
 
 ### `--interval`
 
@@ -91,6 +98,15 @@
 - `$NEMU_HOME/resource/simpoint/simpoint_repo/bin/simpoint`
 
 ## 输出目录
+
+本地直接运行脚本时，默认会写到：
+- `archive/<archive-id>/`
+
+GitHub Action 默认会写到：
+- `/nfs/home/share/<runner-username>/checkpoint-trigger/<archive-id>/`
+
+如果 workflow 里显式传了 `output_base`，则会写到：
+- `<output_base>/<archive-id>/`
 
 archive 顶层固定包含：
 - `profiling/`

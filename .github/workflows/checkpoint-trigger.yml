@@ -17,6 +17,11 @@ on:
         description: Existing archive id for resume, or explicit output archive id
         required: false
         type: string
+      output_base:
+        description: Optional output base directory; defaults to /nfs/home/share/<runner-username>/checkpoint-trigger
+        required: false
+        default: ""
+        type: string
       interval:
         description: Checkpoint interval
         required: false
@@ -69,6 +74,13 @@ jobs:
             exit 1
           fi
           source "$ENV_SCRIPT"
+
+          RUNNER_USERNAME="$(id -un)"
+          OUTPUT_BASE_INPUT="${{ github.event.inputs.output_base }}"
+          CHECKPOINT_USERNAME="$RUNNER_USERNAME"
+          CHECKPOINT_OUTPUT_BASE="${OUTPUT_BASE_INPUT:-/nfs/home/share/${RUNNER_USERNAME}/checkpoint-trigger}"
+          export CHECKPOINT_USERNAME
+          export CHECKPOINT_OUTPUT_BASE
 
           INPUT_PATH="${{ github.event.inputs.input_path }}"
           WORKLOAD_NAME="${{ github.event.inputs.name }}"
@@ -170,12 +182,21 @@ jobs:
           echo "INFO: interval=$INTERVAL"
           echo "INFO: max_workers=$MAX_WORKERS"
           echo "INFO: archive_id=${ARCHIVE_ID_INPUT:-auto}"
+          echo "INFO: checkpoint_username=$CHECKPOINT_USERNAME"
+          echo "INFO: output_base_input=${OUTPUT_BASE_INPUT:-auto}"
+          echo "INFO: checkpoint_output_base=$CHECKPOINT_OUTPUT_BASE"
 
-          python3 generate_checkpoint.py \
+          PYTHON_OUTPUT="$(
+            python3 generate_checkpoint.py \
             --input-path "$INPUT_PATH" \
             --interval "$INTERVAL" \
             --max-workers "$MAX_WORKERS" \
             "${EXTRA_ARGS[@]}"
+          )"
+          printf '%s\n' "$PYTHON_OUTPUT"
+
+          ACTUAL_ARCHIVE_ID="$(printf '%s\n' "$PYTHON_OUTPUT" | sed -n 's/^Archive: //p' | tail -n 1)"
+          ACTUAL_ARCHIVE_ROOT="$(printf '%s\n' "$PYTHON_OUTPUT" | sed -n 's/^Archive root: //p' | tail -n 1)"
 
           {
             echo "## Checkpoint Result"
@@ -186,7 +207,10 @@ jobs:
             echo "- interval: \`$INTERVAL\`"
             echo "- max_workers: \`$MAX_WORKERS\`"
             echo "- resume_after: \`${RESUME_AFTER:-fresh}\`"
-            echo "- archive_id: \`${ARCHIVE_ID_INPUT:-auto}\`"
+            echo "- archive_id: \`${ACTUAL_ARCHIVE_ID:-${ARCHIVE_ID_INPUT:-auto}}\`"
+            echo "- output_base: \`${CHECKPOINT_OUTPUT_BASE}\`"
+            echo "- archive_root: \`${ACTUAL_ARCHIVE_ROOT:-$CHECKPOINT_OUTPUT_BASE}\`"
+            echo "- checkpoint_username: \`$CHECKPOINT_USERNAME\`"
             echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
             echo "- nemu_home: \`${NEMU_OVERRIDE_HOME:-$NEMU_HOME}\`"
             echo "- nemu_defconfig: \`$NEMU_DEFCONFIG\`"

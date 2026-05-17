@@ -52,6 +52,49 @@ class RunCheckpointTests(unittest.TestCase):
         )
         self.assertEqual(args.max_workers, 3)
 
+    def test_resolve_output_base_dir_defaults_to_local_archive(self):
+        with mock.patch.dict(
+            checkpoint_runner.os.environ,
+            {},
+            clear=True,
+        ):
+            self.assertEqual(
+                checkpoint_runner.resolve_output_base_dir(),
+                str((REPO_ROOT / "archive").resolve()),
+            )
+
+    def test_build_archive_root_joins_archive_under_local_archive_directory(self):
+        with mock.patch.dict(
+            checkpoint_runner.os.environ,
+            {},
+            clear=True,
+        ):
+            self.assertEqual(
+                checkpoint_runner.build_archive_root("2026-05-17-12-00-00_demo"),
+                str((REPO_ROOT / "archive" / "2026-05-17-12-00-00_demo").resolve()),
+            )
+
+    def test_generate_archive_id_for_file_puts_timestamp_before_workload(self):
+        fake_now = mock.Mock()
+        fake_now.strftime.return_value = "2026-05-17-12-00-00"
+        with mock.patch.object(checkpoint_runner, "datetime") as mock_datetime:
+            mock_datetime.now.return_value = fake_now
+            archive_id = checkpoint_runner.generate_archive_id("file", "demo")
+
+        self.assertEqual(archive_id, "2026-05-17-12-00-00_demo")
+
+    def test_generate_archive_id_for_directory_uses_input_dir_name(self):
+        fake_now = mock.Mock()
+        fake_now.strftime.return_value = "2026-05-17-12-00-00"
+        with mock.patch.object(checkpoint_runner, "datetime") as mock_datetime:
+            mock_datetime.now.return_value = fake_now
+            archive_id = checkpoint_runner.generate_archive_id(
+                "directory",
+                input_path="/tmp/spec-bins",
+            )
+
+        self.assertEqual(archive_id, "2026-05-17-12-00-00_spec-bins")
+
     def test_load_input_entries_for_directory_uses_common_suffix(self):
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bins"
@@ -400,6 +443,8 @@ class RunCheckpointTests(unittest.TestCase):
             ), mock.patch.object(
                 checkpoint_runner, "clear_aggregate_metadata"
             ), mock.patch.object(
+                checkpoint_runner, "build_archive_root", return_value=expected_archive_root
+            ), mock.patch.object(
                 checkpoint_runner, "run_workload"
             ) as run_workload:
                 exit_code = checkpoint_runner.main()
@@ -433,6 +478,7 @@ class RunCheckpointTests(unittest.TestCase):
 
             parser = mock.Mock()
             parser.parse_args.return_value = args
+            expected_archive_root = str((REPO_ROOT / "archive" / "shared-archive").resolve())
 
             future_alpha = mock.Mock()
             future_alpha.result.return_value = {
@@ -471,6 +517,10 @@ class RunCheckpointTests(unittest.TestCase):
             ), mock.patch.object(
                 checkpoint_runner, "generate_checkpoint_metadata"
             ) as generate_metadata, mock.patch.object(
+                checkpoint_runner, "build_archive_root", return_value=expected_archive_root
+            ), mock.patch.object(
+                checkpoint_runner.os, "makedirs"
+            ), mock.patch.object(
                 checkpoint_runner, "run_workload"
             ) as run_workload, mock.patch.object(
                 checkpoint_runner.concurrent.futures, "ThreadPoolExecutor"
@@ -483,7 +533,6 @@ class RunCheckpointTests(unittest.TestCase):
                 pool.submit.side_effect = [future_alpha, future_beta]
                 exit_code = checkpoint_runner.main()
 
-            expected_archive_root = str((REPO_ROOT / "archive" / "shared-archive").resolve())
             self.assertEqual(exit_code, 0)
             self.assertEqual(pool.submit.call_count, 2)
             pool.submit.assert_has_calls(
