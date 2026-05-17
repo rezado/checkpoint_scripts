@@ -33,7 +33,7 @@ class CheckpointWorkflowTests(unittest.TestCase):
         self.assertEqual(inputs["max_k"]["default"], "")
         self.assertEqual(inputs["max_workers"]["default"], "3")
         self.assertEqual(inputs["resume_after"]["default"], "")
-        self.assertEqual(job["timeout-minutes"], "20160")
+        self.assertEqual(job["timeout-minutes"], "40320")
         self.assertEqual(checkout["with"]["clean"], "false")
 
         run_script = job["steps"][-1]["run"]

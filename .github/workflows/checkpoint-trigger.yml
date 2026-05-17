@@ -60,7 +60,7 @@ on:
 jobs:
   run-checkpoint:
     runs-on: self-hosted
-    timeout-minutes: 20160 # 14 days
+    timeout-minutes: 40320 # 28 days
     steps:
       - name: Checkout
         uses: actions/checkout@v4
