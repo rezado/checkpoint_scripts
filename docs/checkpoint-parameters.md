@@ -44,6 +44,16 @@
 - 指定 CI 输出根目录
 - 默认值是 `/nfs/home/share/<runner-username>/checkpoint-trigger`
 
+### `nemu`
+
+- 仅 GitHub Action 输入提供
+- 可选
+- 默认值是 `riscv64-xs-cpt_defconfig`
+- 以 `_defconfig` 结尾时，会在 CI workspace 拉取 upstream NEMU，并编译 NEMU、`gcpt_restore` 和 `simpoint`
+- 否则会当作现有 NEMU 路径，并检查以下文件都存在且可执行：
+  - `build/riscv64-nemu-interpreter`
+  - `resource/simpoint/simpoint_repo/bin/simpoint`
+
 ### `--interval`
 
 - 可选

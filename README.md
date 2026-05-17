@@ -49,12 +49,13 @@
   可选；覆盖 SimPoint `-maxK`，实际生效值是 `max(内置 workload 默认值, 用户输入值)`
 - `max_workers`
   目录模式下的最大并行 workload 数，默认 `3`
+- `nemu`
+  可选；默认值是 `riscv64-xs-cpt_defconfig`
+  `_defconfig` 结尾会在 CI workspace 拉取 upstream NEMU 并编译；否则按现有 NEMU 路径校验并使用
 - `resume_after`
   可选；`profiling`、`cluster`、`auto`
-- `rebuild_nemu`
-  可选；为 `true` 时先重编译 NEMU、`gcpt_restore` 和 `simpoint`
 
-workflow timeout 目前是 14 天。
+workflow timeout 目前是 28 天。
 
 ## 本地使用
 

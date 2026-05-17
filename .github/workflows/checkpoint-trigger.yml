@@ -37,24 +37,15 @@ on:
         required: false
         default: "3"
         type: string
+      nemu:
+        description: NEMU defconfig or path; *_defconfig builds upstream NEMU in CI workspace
+        required: false
+        default: "riscv64-xs-cpt_defconfig"
+        type: string
       resume_after:
         description: Resume mode for an existing archive
         required: false
         default: ""
-        type: string
-      rebuild_nemu:
-        description: Rebuild only NEMU before running the checkpoint flow
-        required: false
-        default: "false"
-        type: boolean
-      nemu_home:
-        description: Optional NEMU directory override
-        required: false
-        type: string
-      nemu_defconfig:
-        description: Defconfig used when rebuilding NEMU
-        required: false
-        default: "riscv64-xs-cpt_defconfig"
         type: string
 
 jobs:
@@ -93,18 +84,23 @@ jobs:
           INTERVAL="${{ github.event.inputs.interval }}"
           MAX_K_INPUT="${{ github.event.inputs.max_k }}"
           MAX_WORKERS="${{ github.event.inputs.max_workers }}"
+          NEMU_INPUT="${{ github.event.inputs.nemu }}"
           RESUME_AFTER="${{ github.event.inputs.resume_after }}"
-          REBUILD_NEMU="${{ github.event.inputs.rebuild_nemu }}"
-          NEMU_OVERRIDE_HOME="${{ github.event.inputs.nemu_home }}"
-          NEMU_DEFCONFIG="${{ github.event.inputs.nemu_defconfig }}"
 
-          if [[ -n "$NEMU_OVERRIDE_HOME" ]]; then
-            if [[ ! -d "$NEMU_OVERRIDE_HOME" ]]; then
-              echo "ERROR: NEMU override directory does not exist: $NEMU_OVERRIDE_HOME"
+          validate_nemu_home() {
+            local nemu_home="$1"
+            local nemu_bin="$nemu_home/build/riscv64-nemu-interpreter"
+            local simpoint_bin="$nemu_home/resource/simpoint/simpoint_repo/bin/simpoint"
+
+            if [[ ! -x "$nemu_bin" ]]; then
+              echo "ERROR: missing executable NEMU binary: $nemu_bin"
               exit 1
             fi
-            export NEMU_HOME="$NEMU_OVERRIDE_HOME"
-          fi
+            if [[ ! -x "$simpoint_bin" ]]; then
+              echo "ERROR: missing executable SimPoint binary: $simpoint_bin"
+              exit 1
+            fi
+          }
 
           if [[ -z "$INPUT_PATH" ]]; then
             echo "ERROR: input_path must be provided"
@@ -128,6 +124,11 @@ jobs:
 
           if [[ ! "$MAX_WORKERS" =~ ^[0-9]+$ ]] || [[ "$MAX_WORKERS" -le 0 ]]; then
             echo "ERROR: max_workers must be a positive integer, got: $MAX_WORKERS"
+            exit 1
+          fi
+
+          if [[ -z "$NEMU_INPUT" ]]; then
+            echo "ERROR: nemu must be provided"
             exit 1
           fi
 
@@ -160,31 +161,35 @@ jobs:
             EXTRA_ARGS+=(--resume-after "$RESUME_AFTER")
           fi
 
-          if [[ "$REBUILD_NEMU" == "true" ]]; then
-            if [[ -z "$NEMU_HOME" ]]; then
-              echo "ERROR: NEMU_HOME is not set after loading env.sh"
-              exit 1
-            fi
-            if [[ ! -d "$NEMU_HOME" ]]; then
-              echo "ERROR: NEMU_HOME does not exist: $NEMU_HOME"
-              exit 1
-            fi
-            if [[ -z "$NEMU_DEFCONFIG" ]]; then
-              echo "ERROR: nemu_defconfig must not be empty when rebuilding NEMU"
-              exit 1
-            fi
+          NEMU_MODE="path"
+          NEMU_DEFCONFIG=""
+          if [[ "$NEMU_INPUT" == *_defconfig ]]; then
+            NEMU_MODE="build"
+            NEMU_DEFCONFIG="$NEMU_INPUT"
+            NEMU_UPSTREAM_URL="https://github.com/OpenXiangShan/NEMU.git"
+            NEMU_UPSTREAM_BRANCH="master"
+            NEMU_HOME="$GITHUB_WORKSPACE/.ci-nemu-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-            echo "INFO: rebuilding NEMU at $NEMU_HOME"
-            echo "INFO: nemu_defconfig=$NEMU_DEFCONFIG"
+            echo "INFO: cloning upstream NEMU from $NEMU_UPSTREAM_URL branch=$NEMU_UPSTREAM_BRANCH"
+            rm -rf "$NEMU_HOME"
+            git clone --recursive --branch "$NEMU_UPSTREAM_BRANCH" "$NEMU_UPSTREAM_URL" "$NEMU_HOME"
             (
               cd "$NEMU_HOME"
+              git submodule update --init --recursive
               make "$NEMU_DEFCONFIG"
               make -j
-              git submodule update --init
               cd "$NEMU_HOME/resource/gcpt_restore" && make -j
               cd "$NEMU_HOME/resource/simpoint/simpoint_repo" && make -j
             )
+          else
+            NEMU_HOME="$NEMU_INPUT"
+            if [[ ! -d "$NEMU_HOME" ]]; then
+              echo "ERROR: NEMU path does not exist: $NEMU_HOME"
+              exit 1
+            fi
           fi
+          validate_nemu_home "$NEMU_HOME"
+          export NEMU_HOME
 
           INPUT_KIND="file"
           if [[ -d "$INPUT_PATH" ]]; then
@@ -196,6 +201,9 @@ jobs:
           echo "INFO: interval=$INTERVAL"
           echo "INFO: max_k=${MAX_K_INPUT:-auto}"
           echo "INFO: max_workers=$MAX_WORKERS"
+          echo "INFO: nemu=$NEMU_INPUT"
+          echo "INFO: nemu_mode=$NEMU_MODE"
+          echo "INFO: nemu_home=$NEMU_HOME"
           echo "INFO: archive_id=${ARCHIVE_ID_INPUT:-auto}"
           echo "INFO: checkpoint_username=$CHECKPOINT_USERNAME"
           echo "INFO: output_base_input=${OUTPUT_BASE_INPUT:-auto}"
@@ -222,12 +230,12 @@ jobs:
             echo "- interval: \`$INTERVAL\`"
             echo "- max_k: \`${MAX_K_INPUT:-auto}\`"
             echo "- max_workers: \`$MAX_WORKERS\`"
+            echo "- nemu: \`$NEMU_INPUT\`"
+            echo "- nemu_mode: \`$NEMU_MODE\`"
+            echo "- nemu_home: \`$NEMU_HOME\`"
             echo "- resume_after: \`${RESUME_AFTER:-fresh}\`"
             echo "- archive_id: \`${ACTUAL_ARCHIVE_ID:-${ARCHIVE_ID_INPUT:-auto}}\`"
             echo "- output_base: \`${CHECKPOINT_OUTPUT_BASE}\`"
             echo "- archive_root: \`${ACTUAL_ARCHIVE_ROOT:-$CHECKPOINT_OUTPUT_BASE}\`"
             echo "- checkpoint_username: \`$CHECKPOINT_USERNAME\`"
-            echo "- rebuild_nemu: \`$REBUILD_NEMU\`"
-            echo "- nemu_home: \`${NEMU_OVERRIDE_HOME:-$NEMU_HOME}\`"
-            echo "- nemu_defconfig: \`$NEMU_DEFCONFIG\`"
           } >> "$GITHUB_STEP_SUMMARY"
