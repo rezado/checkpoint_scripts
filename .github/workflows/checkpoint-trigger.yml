@@ -50,7 +50,7 @@ on:
 jobs:
   run-single-bin-checkpoint:
     runs-on: self-hosted
-    timeout-minutes: 2880
+    timeout-minutes: 20160 # 14 days
     steps:
       - name: Checkout
         uses: actions/checkout@v4
