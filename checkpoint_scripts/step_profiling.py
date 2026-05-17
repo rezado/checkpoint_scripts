@@ -2,10 +2,10 @@ import argparse
 import os
 import subprocess
 
-from checkpoint_env import load_nemu_paths
-from checkpoint_layout import profiling_dir
-from checkpoint_layout import profiling_log_dir
-from checkpoint_layout import profiling_stage_name
+from generate_checkpoint import load_nemu_paths
+from generate_checkpoint import profiling_dir
+from generate_checkpoint import profiling_log_dir
+from generate_checkpoint import profiling_stage_name
 
 
 CHECKPOINT_FORMAT = "zstd"

@@ -171,7 +171,7 @@ jobs:
           echo "INFO: max_workers=$MAX_WORKERS"
           echo "INFO: archive_id=${ARCHIVE_ID_INPUT:-auto}"
 
-          python3 run_checkpoint.py \
+          python3 generate_checkpoint.py \
             --input-path "$INPUT_PATH" \
             --interval "$INTERVAL" \
             --max-workers "$MAX_WORKERS" \

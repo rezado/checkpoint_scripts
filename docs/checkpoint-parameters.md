@@ -1,6 +1,6 @@
 # Checkpoint Parameters
 
-这个仓库现在只保留 `run_checkpoint.py` 这一条主入口。
+这个仓库现在只保留 `generate_checkpoint.py` 这一条主入口。
 
 它固定执行四个步骤：
 1. `profiling`
@@ -11,7 +11,7 @@
 ## 命令行参数
 
 入口：
-- `checkpoint_scripts/run_checkpoint.py`
+- `checkpoint_scripts/generate_checkpoint.py`
 
 ### `--input-path`
 

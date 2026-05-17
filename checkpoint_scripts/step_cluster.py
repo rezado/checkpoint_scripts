@@ -3,10 +3,10 @@ import os
 import random
 import subprocess
 
-from checkpoint_env import load_nemu_paths
-from checkpoint_layout import cluster_dir
-from checkpoint_layout import cluster_log_dir
-from checkpoint_layout import profiling_dir
+from generate_checkpoint import cluster_dir
+from generate_checkpoint import cluster_log_dir
+from generate_checkpoint import load_nemu_paths
+from generate_checkpoint import profiling_dir
 
 
 def max_k_for_workload(workload: str) -> int:

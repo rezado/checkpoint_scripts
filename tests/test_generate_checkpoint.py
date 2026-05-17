@@ -10,7 +10,7 @@ SCRIPT_DIR = REPO_ROOT / "checkpoint_scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import run_checkpoint as checkpoint_runner
+import generate_checkpoint as checkpoint_runner
 
 
 class RunCheckpointTests(unittest.TestCase):

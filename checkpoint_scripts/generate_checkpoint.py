@@ -2,27 +2,9 @@ import argparse
 import concurrent.futures
 import os
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-
-from checkpoint_env import load_nemu_paths
-from checkpoint_layout import archive_layout
-from checkpoint_layout import checkpoint_dir
-from checkpoint_layout import checkpoint_list_path
-from checkpoint_layout import checkpoint_log_dir
-from checkpoint_layout import cluster_dir
-from checkpoint_layout import cluster_log_dir
-from checkpoint_layout import profiling_dir
-from checkpoint_layout import profiling_log_dir
-from checkpoint_layout import workload_json_path
-from step_checkpoint import count_checkpoints
-from step_checkpoint import run_checkpoint_step
-from step_checkpoint import validate_outputs
-from step_metadata import cluster_weight
-from step_metadata import generate_checkpoint_metadata
-from step_profiling import run_profiling_step
-from step_cluster import run_cluster_step
-
 
 AUTO_RESUME = "auto"
 COMPLETE_STATE = "complete"
@@ -31,6 +13,173 @@ KNOWN_WORKLOAD_SUFFIXES = (
     ".fw_payload.bin",
     ".bin",
 )
+
+
+@dataclass(frozen=True)
+class NemuPaths:
+    home: str
+    nemu: str
+    simpoint: str
+
+
+def require_env_path(env_var: str) -> str:
+    value = os.environ.get(env_var)
+    if not value:
+        raise EnvironmentError(f"{env_var} is not set")
+    if not os.path.isdir(value):
+        raise EnvironmentError(f"{env_var} does not point to a directory: {value}")
+    return value
+
+
+def load_nemu_paths() -> NemuPaths:
+    nemu_home = require_env_path("NEMU_HOME")
+    paths = NemuPaths(
+        home=nemu_home,
+        nemu=os.path.join(nemu_home, "build", "riscv64-nemu-interpreter"),
+        simpoint=os.path.join(
+            nemu_home,
+            "resource",
+            "simpoint",
+            "simpoint_repo",
+            "bin",
+            "simpoint",
+        ),
+    )
+    missing = [
+        path for path in [paths.nemu, paths.simpoint] if not os.path.isfile(path)
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "required runtime tool missing: " + ", ".join(missing))
+    return paths
+
+
+def _normalize_ids(ids):
+    return tuple(int(item) for item in ids)
+
+
+def format_stage_name(base: str, *ids) -> str:
+    normalized = _normalize_ids(ids)
+    if not normalized or all(item == 0 for item in normalized):
+        return base
+    return f"{base}-{'-'.join(str(item) for item in normalized)}"
+
+
+def profiling_stage_name(profiling_id=0) -> str:
+    return format_stage_name("profiling", profiling_id)
+
+
+def cluster_stage_name(profiling_id=0, cluster_id=0) -> str:
+    return format_stage_name("cluster", profiling_id, cluster_id)
+
+
+def checkpoint_stage_name(profiling_id=0, cluster_id=0, checkpoint_id=0) -> str:
+    return format_stage_name("checkpoint", profiling_id, cluster_id,
+                             checkpoint_id)
+
+
+def archive_layout(archive_root: str) -> dict[str, str]:
+    return {
+        "buffer_path": archive_root,
+        "gcpt_bins": os.path.join(archive_root, "gcpt_bins"),
+        "logs": os.path.join(archive_root, "logs"),
+        "metadata": os.path.join(archive_root, "metadata"),
+        "json": os.path.join(archive_root, "json"),
+    }
+
+
+def profiling_dir(archive_root: str, workload: str, profiling_id=0) -> str:
+    return os.path.join(archive_root, profiling_stage_name(profiling_id),
+                        workload)
+
+
+def cluster_dir(archive_root: str,
+                workload: str,
+                profiling_id=0,
+                cluster_id=0) -> str:
+    return os.path.join(archive_root,
+                        cluster_stage_name(profiling_id, cluster_id), workload)
+
+
+def checkpoint_dir(archive_root: str,
+                   workload: str,
+                   profiling_id=0,
+                   cluster_id=0,
+                   checkpoint_id=0) -> str:
+    return os.path.join(
+        archive_root,
+        checkpoint_stage_name(profiling_id, cluster_id, checkpoint_id),
+        workload,
+    )
+
+
+def profiling_log_dir(archive_root: str, workload: str, profiling_id=0) -> str:
+    return os.path.join(archive_root, "logs", profiling_stage_name(profiling_id),
+                        workload)
+
+
+def cluster_log_dir(archive_root: str,
+                    workload: str,
+                    profiling_id=0,
+                    cluster_id=0) -> str:
+    return os.path.join(
+        archive_root,
+        "logs",
+        cluster_stage_name(profiling_id, cluster_id),
+        workload,
+    )
+
+
+def checkpoint_log_dir(archive_root: str,
+                       workload: str,
+                       profiling_id=0,
+                       cluster_id=0,
+                       checkpoint_id=0) -> str:
+    return os.path.join(
+        archive_root,
+        "logs",
+        checkpoint_stage_name(profiling_id, cluster_id, checkpoint_id),
+        workload,
+    )
+
+
+def workload_json_path(archive_root: str, workload: str) -> str:
+    return os.path.join(archive_root, "json", f"{workload}.json")
+
+
+def checkpoint_list_path(archive_root: str,
+                         profiling_id=0,
+                         cluster_id=0,
+                         checkpoint_id=0) -> str:
+    return os.path.join(
+        archive_root,
+        checkpoint_stage_name(profiling_id, cluster_id, checkpoint_id),
+        "checkpoint.lst",
+    )
+
+
+def json_output_dir(base_path: str, checkpoint_name: str) -> str:
+    if checkpoint_name == "checkpoint":
+        return os.path.join(base_path, "json")
+    return os.path.join(base_path, "json", checkpoint_name)
+
+
+def count_checkpoints(archive_root: str, workload: str) -> int:
+    from step_checkpoint import count_checkpoints as _count_checkpoints
+
+    return _count_checkpoints(archive_root, workload)
+
+
+def validate_outputs(archive_root: str, workload: str) -> None:
+    from step_checkpoint import validate_outputs as _validate_outputs
+
+    _validate_outputs(archive_root, workload)
+
+
+def generate_checkpoint_metadata(archive_root, workloads, times, ids):
+    from step_metadata import generate_checkpoint_metadata as _generate_metadata
+
+    _generate_metadata(archive_root, workloads, times, ids)
 
 
 def build_archive_layout(archive_root: str) -> dict[str, str]:
@@ -435,6 +584,10 @@ def run_workload(*,
                  mem_bind: str = "0",
                  metadata_dir: str | None = None,
                  generate_metadata: bool = True) -> dict[str, str | int]:
+    from step_checkpoint import run_checkpoint_step
+    from step_profiling import run_profiling_step
+    from step_cluster import run_cluster_step
+
     layout = build_archive_layout(archive_root)
     ensure_directories(layout.values())
     load_nemu_paths()

@@ -5,11 +5,11 @@ import re
 from itertools import product
 from pathlib import Path
 
-from checkpoint_layout import checkpoint_list_path
-from checkpoint_layout import checkpoint_stage_name
-from checkpoint_layout import cluster_stage_name
-from checkpoint_layout import json_output_dir
-from checkpoint_layout import profiling_stage_name
+from generate_checkpoint import checkpoint_list_path
+from generate_checkpoint import checkpoint_stage_name
+from generate_checkpoint import cluster_stage_name
+from generate_checkpoint import json_output_dir
+from generate_checkpoint import profiling_stage_name
 
 
 INSTRUCTION_REGEX = re.compile(r".*total guest instructions = (.*)\x1b.*")

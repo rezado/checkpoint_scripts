@@ -19,7 +19,7 @@
 
 `checkpoint_scripts/` 目录下保留的脚本按步骤组织：
 
-- `run_checkpoint.py`
+- `generate_checkpoint.py`
   总入口；负责识别输入、批量调度、resume、汇总 metadata
 - `step_profiling.py`
   生成 BBV
@@ -29,10 +29,7 @@
   根据聚类点生成 checkpoint，并校验产物
 - `step_metadata.py`
   生成 `json/*.json` 和 `checkpoint/checkpoint.lst`
-- `checkpoint_layout.py`
-  统一管理 archive/stage 路径
-- `checkpoint_env.py`
-  校验 `NEMU_HOME` 和运行时工具
+  入口内部同时负责统一管理 archive/stage 路径，以及校验 `NEMU_HOME` 和运行时工具
 
 ## GitHub Action
 
@@ -72,7 +69,7 @@ source /nfs/home/share/workload_env/env.sh
 单 bin：
 
 ```bash
-python3 checkpoint_scripts/run_checkpoint.py \
+python3 checkpoint_scripts/generate_checkpoint.py \
   --input-path /path/to/demo.fw_payload.bin \
   --name demo \
   --archive-id demo-checkpoint
@@ -81,7 +78,7 @@ python3 checkpoint_scripts/run_checkpoint.py \
 多 bin：
 
 ```bash
-python3 checkpoint_scripts/run_checkpoint.py \
+python3 checkpoint_scripts/generate_checkpoint.py \
   --input-path /path/to/bin-directory \
   --interval 20000000 \
   --max-workers 3
@@ -90,7 +87,7 @@ python3 checkpoint_scripts/run_checkpoint.py \
 resume：
 
 ```bash
-python3 checkpoint_scripts/run_checkpoint.py \
+python3 checkpoint_scripts/generate_checkpoint.py \
   --input-path /path/to/bin-directory \
   --archive-id checkpoint_batch_2026-05-17-12-00-00 \
   --resume-after auto
@@ -140,7 +137,7 @@ archive/checkpoint_batch_2026-05-17-12-00-00/
 ```bash
 python -m unittest \
   tests.test_step_metadata \
-  tests.test_run_checkpoint \
+  tests.test_generate_checkpoint \
   tests.test_checkpoint_steps \
   tests.test_checkpoint_workflow
 ```

@@ -49,7 +49,7 @@ class CheckpointWorkflowTests(unittest.TestCase):
         self.assertIn('--resume-after "$RESUME_AFTER"', run_script)
         self.assertIn('--archive-id "$ARCHIVE_ID_INPUT"', run_script)
         self.assertIn('--max-workers "$MAX_WORKERS"', run_script)
-        self.assertIn("python3 run_checkpoint.py", run_script)
+        self.assertIn("python3 generate_checkpoint.py", run_script)
         self.assertIn("- input_path: \\`$INPUT_PATH\\`", run_script)
         self.assertIn("- input_kind: \\`$INPUT_KIND\\`", run_script)
         self.assertIn("- archive_id: \\`${ARCHIVE_ID_INPUT:-auto}\\`", run_script)
