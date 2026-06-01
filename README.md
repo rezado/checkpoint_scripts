@@ -139,3 +139,26 @@ GitHub Action 默认输出根目录是 `/nfs/home/share/<runner-username>/checkp
   - `checkpoints_cov0.3.json`
 - `checkpoint/checkpoint.lst`
   汇总后的 checkpoint list
+
+## GCPT Patch
+
+如果运行 checkpoint 发现一开始就卡住，那么大概率是 GCPT 有问题，需要重新生成正确 `gcpt.bin`。
+
+`checkpoint_scripts/replace_checkpoint_prefix.py` 用于批量替换已有 checkpoint 里的 GCPT 前缀。脚本会递归处理 checkpoint 目录下的 `*.zstd` 文件，将解压后的 payload 前段替换为指定 `gcpt.bin` 的内容，再重新压缩到新的输出目录，并保留原有相对路径。
+
+说明：
+- `zstd` 命令需要在 `PATH` 中可用
+- `--gcpt-bin` 指向新的 `gcpt.bin`
+- `--checkpoint-dir` 指向已生成的 checkpoint 目录
+- `--output-dir` 指向新的输出目录，不能和原目录相同，也不能位于原目录内部
+
+示例：
+
+```bash
+python3 checkpoint_scripts/replace_checkpoint_prefix.py \
+  --gcpt-bin /path/to/gcpt.bin \
+  --checkpoint-dir /path/to/archive/checkpoint \
+  --output-dir /path/to/archive/checkpoint-gcpt-patched
+```
+
+脚本只重写 checkpoint 的压缩文件内容，不会同步改写 `json/`、`metadata/` 或 `checkpoint/checkpoint.lst`。
