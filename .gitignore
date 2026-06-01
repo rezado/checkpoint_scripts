@@ -6,6 +6,7 @@ checkpoint_scripts/jemalloc_elf/
 riscv-rootfs/
 
 # 临时测试配置
+tests/
 checkpoint_scripts/config_test.yaml
 checkpoint_scripts/config_full_test.yaml
 checkpoint_scripts/config_full_checkpoint.yaml

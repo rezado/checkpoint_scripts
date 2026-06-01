@@ -139,15 +139,3 @@ GitHub Action 默认输出根目录是 `/nfs/home/share/<runner-username>/checkp
   - `checkpoints_cov0.3.json`
 - `checkpoint/checkpoint.lst`
   汇总后的 checkpoint list
-
-## 测试
-
-当前测试覆盖的是这条精简后的 checkpoint 生成链：
-
-```bash
-python -m unittest \
-  tests.test_step_metadata \
-  tests.test_generate_checkpoint \
-  tests.test_checkpoint_steps \
-  tests.test_checkpoint_workflow
-```
